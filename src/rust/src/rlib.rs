@@ -79,14 +79,13 @@ fn concat_str(dotdotdot: Robj, separator: Robj) -> RResult<RPolarsExpr> {
 }
 
 #[extendr]
-fn r_date_range_lazy(
+fn date_range(
     start: Robj,
     end: Robj,
     every: Robj,
     closed: Robj,
     time_unit: Robj,
     time_zone: Robj,
-    explode: Robj,
 ) -> RResult<RPolarsExpr> {
     let expr = polars::lazy::prelude::date_range(
         robj_to!(PLExprCol, start)?,
@@ -96,11 +95,27 @@ fn r_date_range_lazy(
         robj_to!(Option, timeunit, time_unit)?,
         robj_to!(Option, String, time_zone)?,
     );
-    if robj_to!(bool, explode)? {
-        Ok(RPolarsExpr(expr.explode()))
-    } else {
-        Ok(RPolarsExpr(expr))
-    }
+    Ok(expr.into())
+}
+
+#[extendr]
+fn date_ranges(
+    start: Robj,
+    end: Robj,
+    every: Robj,
+    closed: Robj,
+    time_unit: Robj,
+    time_zone: Robj,
+) -> RResult<RPolarsExpr> {
+    let expr = polars::lazy::prelude::date_ranges(
+        robj_to!(PLExprCol, start)?,
+        robj_to!(PLExprCol, end)?,
+        robj_to!(pl_duration, every)?,
+        robj_to!(ClosedWindow, closed)?,
+        robj_to!(Option, timeunit, time_unit)?,
+        robj_to!(Option, String, time_zone)?,
+    );
+    Ok(expr.into())
 }
 
 #[extendr]
@@ -324,7 +339,8 @@ extendr_module! {
     fn reduce;
 
     //fn r_date_range;
-    fn r_date_range_lazy;
+    fn date_range;
+    fn date_ranges;
     fn as_struct;
     fn struct_;
     //fn field_to_rust2;

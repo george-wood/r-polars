@@ -8,43 +8,52 @@ pl_date_range(
   start,
   end,
   interval,
-  eager = FALSE,
   closed = "both",
   time_unit = "us",
   time_zone = NULL,
-  explode = TRUE
+  explode = TRUE,
+  eager = FALSE
 )
 }
 \arguments{
-\item{start}{POSIXt or Date preferably with time_zone or double or integer}
+\item{start}{Lower bound of the date range. POSIXt or Date preferably with
+time_zone or double or integer}
 
-\item{end}{POSIXt or Date preferably with time_zone or double or integer. If
-\code{end} and \code{interval} are missing, then a single datetime is constructed.}
+\item{end}{Upper bound of the date range. POSIXt or Date preferably with
+time_zone or double or integer. If \code{end} and \code{interval} are missing, then a
+single datetime is constructed.}
 
 \item{interval}{String, a Polars \code{duration} or R \code{\link[=difftime]{difftime()}}. Can be missing
 if \code{end} is missing also.}
 
-\item{eager}{If \code{FALSE} (default), return an \code{Expr}. Otherwise, returns a
+\item{closed}{Define which sides of the range are closed (inclusive). One of
+\code{"both"} (default), \code{"left"}, \code{"none"} or \code{"right"}.}
+
+\item{time_unit}{String (\code{"ns"}, \code{"us"}, \code{"ms"}) or integer. Time unit of the
+resulting \code{Datetime} data type. Only takes effect if the output column is
+of type \code{Datetime}.}
+
+\item{time_zone}{Time zone of the resulting \code{Datetime} data type. Only takes
+effect if the output column is of type \code{Datetime.} If \code{NULL} (default),
+\verb{"GMT} is used.}
+
+\item{explode}{Deprecated.}
+
+\item{eager}{If \code{FALSE} (default), returns an \code{Expr}. Otherwise, returns a
 \code{Series}.}
-
-\item{closed}{One of \code{"both"} (default), \code{"left"}, \code{"none"} or \code{"right"}.}
-
-\item{time_unit}{String (\code{"ns"}, \code{"us"}, \code{"ms"}) or integer.}
-
-\item{time_zone}{String describing a timezone. If \code{NULL} (default), \verb{"GMT} is
-used.}
-
-\item{explode}{If \code{TRUE} (default), all created ranges will be "unlisted"
-into a column. Otherwise, output will be a list of ranges.}
 }
 \value{
-A datetime
+A datetime or date Expr (if \code{eager = FALSE}) or Series (if \code{eager = TRUE})
 }
 \description{
-New date range
+This generate a date range from a lower and an upper bound. This only
+accepts one value for each bound. Use \code{\link[=pl_date_ranges]{pl$date_ranges()}} to
+generate a date range using other columns of a Data/LazyFrame as
+bounds.
 }
 \details{
-If param \code{time_zone} is not defined the Series will have no time zone.
+If param \code{time_zone} is not defined the Series will have no time
+zone.
 
 Note that R POSIXt without defined timezones (tzone/tz), so-called naive
 datetimes, are counter intuitive in R. It is recommended to always set the

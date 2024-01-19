@@ -163,32 +163,50 @@ pl_concat = function(
 
 
 #' New date range
-#' @param start POSIXt or Date preferably with time_zone or double or integer
-#' @param end POSIXt or Date preferably with time_zone or double or integer. If
-#' `end` and `interval` are missing, then a single datetime is constructed.
-#' @param interval String, a Polars `duration` or R [difftime()]. Can be missing
-#' if `end` is missing also.
-#' @param eager If `FALSE` (default), return an `Expr`. Otherwise, returns a
-#' `Series`.
-#' @param closed One of `"both"` (default), `"left"`, `"none"` or `"right"`.
-#' @param time_unit String (`"ns"`, `"us"`, `"ms"`) or integer.
-#' @param time_zone String describing a timezone. If `NULL` (default), `"GMT` is
-#' used.
-#' @param explode If `TRUE` (default), all created ranges will be "unlisted"
-#' into a column. Otherwise, output will be a list of ranges.
 #'
-#' @details
-#' If param `time_zone` is not defined the Series will have no time zone.
+#' This generate a date range from a lower and an upper bound. This only
+#' accepts one value for each bound. Use [`pl$date_ranges()`][pl_date_ranges] to
+#' generate a date range using other columns of a Data/LazyFrame as
+#' bounds.
 #'
-#' Note that R POSIXt without defined timezones (tzone/tz), so-called naive
-#' datetimes, are counter intuitive in R. It is recommended to always set the
-#' timezone of start and end. If not output will vary between local machine
-#' timezone, R and polars.
+#' @param start Lower bound of the date range. POSIXt or Date preferably with
+#'   time_zone or double or integer
+#' @param end Upper bound of the date range. POSIXt or Date preferably with
+#'   time_zone or double or integer.
+#' @param interval String, a Polars `duration` or R [difftime()].
+#' @param closed Define which sides of the range are closed (inclusive). One of
+#'   `"both"` (default), `"left"`, `"none"` or `"right"`.
+#' @param time_unit String (`"ns"`, `"us"`, `"ms"`) or integer. Time unit of the
+#'   resulting `Datetime` data type. Only takes effect if the output column is
+#'   of type `Datetime`.
+#' @param time_zone Time zone of the resulting `Datetime` data type. Only takes
+#'   effect if the output column is of type `Datetime.` If `NULL` (default),
+#'   `"GMT` is used.
+
+
+### TODO: remove `time_unit` and `time_zone` because people should use `datetime_range()`
+### instead
+
+
+
+
+#' @param eager If `FALSE` (default), returns an `Expr`. Otherwise, returns a
+#'   `Series`.
+#' @param explode Deprecated.
 #'
-#' In R/r-polars it is perfectly fine to mix timezones of params `time_zone`,
-#' `start` and `end`.
+#' @details If param `time_zone` is not defined the Series will have no time
+#'   zone.
 #'
-#' @return A datetime
+#'   Note that R POSIXt without defined timezones (tzone/tz), so-called naive
+#'   datetimes, are counter intuitive in R. It is recommended to always set the
+#'   timezone of start and end. If not output will vary between local machine
+#'   timezone, R and polars.
+#'
+#'   In R/r-polars it is perfectly fine to mix timezones of params `time_zone`,
+#'   `start` and `end`.
+#'
+#' @return A datetime or date Expr (if `eager = FALSE`) or Series (if `eager =
+#'   TRUE`)
 #'
 #' @examples
 #' # All in GMT, straight forward, no mental confusion
@@ -217,31 +235,81 @@ pl_concat = function(
 pl_date_range = function(
     start,
     end,
-    interval,
-    eager = FALSE,
+    interval = "1d",
     closed = "both",
     time_unit = "us",
     time_zone = NULL,
-    explode = TRUE) {
-  if (missing(end)) {
-    end = start
-    interval = "1h"
+    explode = TRUE,
+    eager = FALSE) {
+
+  if (isFALSE(explode)) {
+    warning(
+      paste0(
+        "The argument `explode` of `pl$date_range()` is deprecated and will be removed in 0.14.0.",
+        "\nUse `$implode()` after `pl$date_range()` instead."
+      )
+    )
   }
 
-  f_eager_eval = \(lit) {
-    if (isTRUE(eager)) {
-      result(lit$to_series())
-    } else {
-      Ok(lit)
-    }
+  if (is.null(time_unit) && interval == "ns") {
+    time_unit = "ns"
   }
 
   start = cast_naive_value_to_datetime_expr(start)
   end = cast_naive_value_to_datetime_expr(end)
+  out = date_range(start, end, interval, closed, time_unit, time_zone)
 
-  r_date_range_lazy(start, end, interval, closed, time_unit, time_zone, explode) |>
-    and_then(f_eager_eval) |>
+  if (isTRUE(eager)) {
+    out = out$to_series()
+  }
+
+  out |>
     unwrap("in pl$date_range()")
+}
+
+
+#' Create a column of date ranges
+#'
+#' This generate a list of date values for each pair of lower and upper bounds.
+#' This is particularly suited to create ranges by row in Data/LazyFrame. Use
+#' [`pl$date_range()`][pl_date_range] to generate a Series with date values for
+#' a single lower bound and upper bound.
+#'
+#' @inheritParams pl_date_range
+#'
+#' @return An Expr (if `eager = FALSE`) or Series (if `eager = TRUE`) of format
+#'   `list[date]`.
+#'
+#' @examples
+#' df = pl$DataFrame(
+#'   start = c(as.Date("2022-1-1"), as.Date("2022-1-2")),
+#'   end = as.Date("2022-1-3")
+#' )
+#'
+#' df$with_columns(date_range = pl$date_ranges("start", "end"))
+pl_date_ranges = function(
+    start,
+    end,
+    interval = "1d",
+    closed = "both",
+    time_unit = "us",
+    time_zone = NULL,
+    eager = FALSE) {
+
+  if (is.null(time_unit) && interval == "ns") {
+    time_unit = "ns"
+  }
+
+  start = cast_naive_value_to_datetime_expr(start)
+  end = cast_naive_value_to_datetime_expr(end)
+  out = date_ranges(start, end, interval, closed, time_unit, time_zone)
+
+  if (isTRUE(eager)) {
+    out = out$to_series()
+  }
+
+  out |>
+    unwrap("in pl$date_ranges()")
 }
 
 
