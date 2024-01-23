@@ -6,7 +6,6 @@
 # This file was created with the following call:
 #   .Call("wrap__make_polars_wrappers", use_symbols = TRUE, package_name = "polars")
 
-#' @docType package
 #' @usage NULL
 #' @useDynLib polars, .registration = TRUE
 NULL
@@ -161,11 +160,11 @@ RPolarsDataFrame$dtype_strings <- function() .Call(wrap__RPolarsDataFrame__dtype
 
 RPolarsDataFrame$schema <- function() .Call(wrap__RPolarsDataFrame__schema, self)
 
-RPolarsDataFrame$to_list <- function() .Call(wrap__RPolarsDataFrame__to_list, self)
+RPolarsDataFrame$to_list <- function(int64_conversion) .Call(wrap__RPolarsDataFrame__to_list, self, int64_conversion)
 
-RPolarsDataFrame$to_list_unwind <- function() .Call(wrap__RPolarsDataFrame__to_list_unwind, self)
+RPolarsDataFrame$to_list_unwind <- function(int64_conversion) .Call(wrap__RPolarsDataFrame__to_list_unwind, self, int64_conversion)
 
-RPolarsDataFrame$to_list_tag_structs <- function() .Call(wrap__RPolarsDataFrame__to_list_tag_structs, self)
+RPolarsDataFrame$to_list_tag_structs <- function(int64_conversion) .Call(wrap__RPolarsDataFrame__to_list_tag_structs, self, int64_conversion)
 
 RPolarsDataFrame$equals <- function(other) .Call(wrap__RPolarsDataFrame__equals, self, other)
 
@@ -631,7 +630,7 @@ RPolarsExpr$rle <- function() .Call(wrap__RPolarsExpr__rle, self)
 
 RPolarsExpr$rle_id <- function() .Call(wrap__RPolarsExpr__rle_id, self)
 
-RPolarsExpr$list_lengths <- function() .Call(wrap__RPolarsExpr__list_lengths, self)
+RPolarsExpr$list_len <- function() .Call(wrap__RPolarsExpr__list_len, self)
 
 RPolarsExpr$list_contains <- function(other) .Call(wrap__RPolarsExpr__list_contains, self, other)
 
@@ -667,11 +666,13 @@ RPolarsExpr$list_slice <- function(offset, length) .Call(wrap__RPolarsExpr__list
 
 RPolarsExpr$list_eval <- function(expr, parallel) .Call(wrap__RPolarsExpr__list_eval, self, expr, parallel)
 
-RPolarsExpr$list_to_struct <- function(n_field_strategy, name_gen, upper_bound) .Call(wrap__RPolarsExpr__list_to_struct, self, n_field_strategy, name_gen, upper_bound)
+RPolarsExpr$list_to_struct <- function(n_field_strategy, fields, upper_bound) .Call(wrap__RPolarsExpr__list_to_struct, self, n_field_strategy, fields, upper_bound)
 
 RPolarsExpr$list_all <- function() .Call(wrap__RPolarsExpr__list_all, self)
 
 RPolarsExpr$list_any <- function() .Call(wrap__RPolarsExpr__list_any, self)
+
+RPolarsExpr$list_set_operation <- function(other, operation) .Call(wrap__RPolarsExpr__list_set_operation, self, other, operation)
 
 RPolarsExpr$dt_truncate <- function(every, offset) .Call(wrap__RPolarsExpr__dt_truncate, self, every, offset)
 
@@ -1099,7 +1100,7 @@ RPolarsLazyFrame$with_row_count <- function(name, offset) .Call(wrap__RPolarsLaz
 
 RPolarsLazyFrame$join_asof <- function(other, left_on, right_on, left_by, right_by, allow_parallel, force_parallel, suffix, strategy, tolerance, tolerance_str) .Call(wrap__RPolarsLazyFrame__join_asof, self, other, left_on, right_on, left_by, right_by, allow_parallel, force_parallel, suffix, strategy, tolerance, tolerance_str)
 
-RPolarsLazyFrame$join <- function(other, left_on, right_on, how, suffix, allow_parallel, force_parallel) .Call(wrap__RPolarsLazyFrame__join, self, other, left_on, right_on, how, suffix, allow_parallel, force_parallel)
+RPolarsLazyFrame$join <- function(other, left_on, right_on, how, validate, join_nulls, suffix, allow_parallel, force_parallel) .Call(wrap__RPolarsLazyFrame__join, self, other, left_on, right_on, how, validate, join_nulls, suffix, allow_parallel, force_parallel)
 
 RPolarsLazyFrame$sort_by_exprs <- function(by, dotdotdot, descending, nulls_last, maintain_order) .Call(wrap__RPolarsLazyFrame__sort_by_exprs, self, by, dotdotdot, descending, nulls_last, maintain_order)
 
@@ -1163,7 +1164,7 @@ RPolarsSeries$sleep <- function(millis) .Call(wrap__RPolarsSeries__sleep, self, 
 
 RPolarsSeries$panic <- function() .Call(wrap__RPolarsSeries__panic, self)
 
-RPolarsSeries$to_r <- function() .Call(wrap__RPolarsSeries__to_r, self)
+RPolarsSeries$to_r <- function(int64_conversion) .Call(wrap__RPolarsSeries__to_r, self, int64_conversion)
 
 RPolarsSeries$rename_mut <- function(name) invisible(.Call(wrap__RPolarsSeries__rename_mut, self, name))
 

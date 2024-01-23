@@ -18,7 +18,7 @@ use crate::CONFIG;
 use extendr_api::{extendr, prelude::*, rprintln, Deref, DerefMut, Rinternals};
 use pl::PolarsError as pl_error;
 use pl::{
-    BinaryNameSpaceImpl, Duration, DurationMethods, IntoSeries, RollingGroupOptions,
+    BinaryNameSpaceImpl, Duration, DurationMethods, IntoSeries, RollingGroupOptions, SetOperation,
     StringNameSpaceImpl, TemporalMethods,
 };
 use polars::lazy::dsl;
@@ -1023,7 +1023,7 @@ impl RPolarsExpr {
 
     //arr/list methods
 
-    fn list_lengths(&self) -> Self {
+    fn list_len(&self) -> Self {
         self.0.clone().list().len().into()
     }
 
@@ -1136,11 +1136,11 @@ impl RPolarsExpr {
     fn list_to_struct(
         &self,
         n_field_strategy: Robj,
-        name_gen: Robj,
+        fields: Robj,
         upper_bound: Robj,
     ) -> RResult<Self> {
         let width_strat = robj_to!(ListToStructWidthStrategy, n_field_strategy)?;
-        let name_gen = robj_to!(Option, Robj, name_gen)?.map(|robj| {
+        let fields = robj_to!(Option, Robj, fields)?.map(|robj| {
             let par_fn: ParRObj = robj.into();
             let f: Arc<(dyn Fn(usize) -> SmartString<LazyCompact> + Send + Sync + 'static)> =
                 pl::Arc::new(move |idx: usize| {
@@ -1155,7 +1155,7 @@ impl RPolarsExpr {
         let ub = robj_to!(usize, upper_bound)?;
         Ok(RPolarsExpr(self.0.clone().list().to_struct(
             width_strat,
-            name_gen,
+            fields,
             ub,
         )))
     }
@@ -1166,6 +1166,19 @@ impl RPolarsExpr {
 
     fn list_any(&self) -> Self {
         self.0.clone().list().any().into()
+    }
+
+    fn list_set_operation(&self, other: Robj, operation: Robj) -> RResult<Self> {
+        let other = robj_to!(PLExprCol, other)?;
+        let operation = robj_to!(SetOperation, operation)?;
+        let e = self.0.clone().list();
+        Ok(match operation {
+            SetOperation::Intersection => e.set_intersection(other),
+            SetOperation::Difference => e.set_difference(other),
+            SetOperation::Union => e.union(other),
+            SetOperation::SymmetricDifference => e.set_symmetric_difference(other),
+        }
+        .into())
     }
 
     //datetime methods
@@ -2033,7 +2046,6 @@ impl RPolarsExpr {
             .into())
     }
 
-    //TODO: SHOW CASE all R side argument handling
     pub fn str_split(&self, by: Robj, inclusive: Robj) -> Result<RPolarsExpr, String> {
         let by = robj_to!(PLExpr, by)?;
         let inclusive = robj_to!(bool, inclusive)?;
@@ -2044,8 +2056,6 @@ impl RPolarsExpr {
         }
     }
 
-    //TODO: SHOW CASE all rust side argument handling, n is usize and had to be
-    //handled on rust side anyways
     pub fn str_split_exact(
         &self,
         by: Robj,
@@ -2435,10 +2445,7 @@ fn f_str_to_titlecase(expr: &RPolarsExpr) -> RResult<RPolarsExpr> {
     return (Ok(expr.0.clone().str().to_titlecase().into()));
 
     #[cfg(not(feature = "simd"))]
-    rerr().plain(
-        "$to_titlecase() is only available with 'simd' enabled. Try our github \
-    binary releases or compile with env var RPOLARS_FULL_FEATURES = 'true'",
-    )
+    rerr().plain("$to_titlecase() is only available with the 'simd' feature")
 }
 
 //allow proto expression that yet only are strings

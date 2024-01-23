@@ -499,6 +499,32 @@ pub fn robj_to_closed_window(robj: Robj) -> RResult<pl::ClosedWindow> {
     }
 }
 
+pub fn robj_to_set_operation(robj: Robj) -> RResult<pl::SetOperation> {
+    use pl::SetOperation as SO;
+    match robj_to_rchoice(robj)?.as_str() {
+        "union" => Ok(SO::Union),
+        "intersection" => Ok(SO::Intersection),
+        "difference" => Ok(SO::Difference),
+        "symmetric_difference" => Ok(SO::SymmetricDifference),
+        s => rerr().bad_val(format!(
+            "SetOperation choice ['{s}'] should be one of 'union', 'intersection', 'difference', 'symmetric_difference'"
+        )),
+    }
+}
+
+pub fn robj_to_join_validation(robj: Robj) -> RResult<pl::JoinValidation> {
+    use pl::JoinValidation as JV;
+    match robj_to_rchoice(robj)?.as_str() {
+        "m:m" => Ok(JV::ManyToMany),
+        "1:m" => Ok(JV::OneToMany),
+        "1:1" => Ok(JV::OneToOne),
+        "m:1" => Ok(JV::ManyToOne),
+        s => rerr().bad_val(format!(
+            "JoinValidation choice ['{s}'] should be one of 'm:m', '1:m', '1:1', 'm:1'"
+        )),
+    }
+}
+
 pub fn robj_to_label(robj: Robj) -> RResult<pl::Label> {
     use pl::Label;
     match robj_to_rchoice(robj)?.as_str() {

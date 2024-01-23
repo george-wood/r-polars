@@ -97,8 +97,8 @@ wrap_e = function(e, str_to_lit = TRUE) {
 #' @examples pl$col("foo") < 5
 wrap_e_result = function(e, str_to_lit = TRUE, argname = NULL) {
   # disable call info
-  old_option = pl$options$do_not_repeat_call
-  pl$set_options(do_not_repeat_call = TRUE)
+  old_option = polars_options()$do_not_repeat_call
+  options(polars.do_not_repeat_call = TRUE)
 
   # wrap_e and catch nay error in a result
   expr_result = result(
@@ -113,7 +113,7 @@ wrap_e_result = function(e, str_to_lit = TRUE, argname = NULL) {
 
   # restore this option but only if it was originally FALSE
   if (isFALSE(old_option)) {
-    pl$set_options(do_not_repeat_call = FALSE)
+    options(polars.do_not_repeat_call = FALSE)
   }
 
   expr_result
@@ -643,29 +643,31 @@ construct_ProtoExprArray = function(...) {
 #' could theoretically have some downstream implications to the query.
 #' @param agg_list Aggregate list. Map from vector to group in group_by context.
 #' @param in_background Boolean. Whether to execute the map in a background R
-#' process. Combined with setting e.g. `pl$set_options(rpool_cap = 4)` it can speed
+#' process. Combined with setting e.g. `options(polars.rpool_cap = 4)` it can speed
 #' up some slow R functions as they can run in parallel R sessions. The
 #' communication speed between processes is quite slower than between threads.
 #' This will likely only give a speed-up in a "low IO - high CPU" use case.
-#' If there are multiple `$map(in_background = TRUE)` calls in the query, they
-#' will be run in parallel.
+#' If there are multiple [`$map_batches(in_background = TRUE)`][Expr_map_batches]
+#' calls in the query, they will be run in parallel.
 #'
 #' @return Expr
 #' @details
 #' It is sometimes necessary to apply a specific R function on one or several
-#' columns. However, note that using R code in `$map()` is slower than native
-#' polars. The user function must take one polars `Series` as input and the return
+#' columns. However, note that using R code in [`$map_batches()`][Expr_map_batches]
+#' is slower than native polars.
+#' The user function must take one polars `Series` as input and the return
 #' should be a `Series` or any Robj convertible into a `Series` (e.g. vectors).
 #' Map fully supports `browser()`.
 #'
 #' If `in_background = FALSE` the function can access any global variable of the
-#' R session. However, note that several calls to `$map()` will sequentially
-#' share the same main R session, so the global environment might change between
-#' the start of the query and the moment a `map()` call is evaluated. Any native
+#' R session. However, note that several calls to [`$map_batches()`][Expr_map_batches]
+#' will sequentially share the same main R session,
+#' so the global environment might change between the start of the query and the moment
+#' a [`$map_batches()`][Expr_map_batches] call is evaluated. Any native
 #' polars computations can still be executed meanwhile. If `in_background = TRUE`,
 #' the map will run in one or more other R sessions and will not have access
-#' to global variables. Use `pl$set_options(rpool_cap = 4)` and `pl$options$rpool_cap`
-#' to see and view number of parallel R sessions.
+#' to global variables. Use `options(polars.rpool_cap = 4)` and
+#' `polars_options()$rpool_cap` to set and view number of parallel R sessions.
 #'
 #' @examples
 #' pl$DataFrame(iris)$
@@ -687,9 +689,9 @@ construct_ProtoExprArray = function(...) {
 #' )$collect() |> system.time()
 #'
 #' # map in parallel 1: Overhead to start up extra R processes / sessions
-#' pl$set_options(rpool_cap = 0) # drop any previous processes, just to show start-up overhead
-#' pl$set_options(rpool_cap = 4) # set back to 4, the default
-#' pl$options$rpool_cap
+#' options(polars.rpool_cap = 0) # drop any previous processes, just to show start-up overhead
+#' options(polars.rpool_cap = 4) # set back to 4, the default
+#' polars_options()$rpool_cap
 #' pl$LazyFrame(a = 1, b = 2, c = 3, d = 4)$select(
 #'   pl$all()$map_batches(\(s) {
 #'     Sys.sleep(.1)
@@ -698,7 +700,7 @@ construct_ProtoExprArray = function(...) {
 #' )$collect() |> system.time()
 #'
 #' # map in parallel 2: Reuse R processes in "polars global_rpool".
-#' pl$options$rpool_cap
+#' polars_options()$rpool_cap
 #' pl$LazyFrame(a = 1, b = 2, c = 3, d = 4)$select(
 #'   pl$all()$map_batches(\(s) {
 #'     Sys.sleep(.1)
@@ -716,18 +718,6 @@ Expr_map_batches = function(f, output_type = NULL, agg_list = FALSE, in_backgrou
     unwrap("in $map_batches():")
 }
 
-Expr_map = function(f, output_type = NULL, agg_list = FALSE, in_background = FALSE) {
-  warning("$map() is deprecated and will be removed in 0.13.0. Use $map_batches() instead.", call. = FALSE)
-  if (isTRUE(in_background)) {
-    out = .pr$Expr$map_batches_in_background(self, f, output_type, agg_list)
-  } else {
-    out = .pr$Expr$map_batches(self, f, output_type, agg_list)
-  }
-
-  out |>
-    unwrap("in $map():")
-}
-
 #' Map a custom/user-defined function (UDF) to each element of a column
 #'
 #' The UDF is applied to each element of a column. See Details for more information
@@ -742,7 +732,7 @@ Expr_map = function(f, output_type = NULL, agg_list = FALSE, in_background = FAL
 #' @param allow_fail_eval If `FALSE` (default), raise an error if the function
 #' fails. If `TRUE`, the result will be converted to a polars null value.
 #' @param in_background Whether to run the function in a background R process,
-#' default is `FALSE`. Combined with setting e.g. `pl$set_options(rpool_cap = 4)`,
+#' default is `FALSE`. Combined with setting e.g. `options(polars.rpool_cap = 4)`,
 #' this can speed up some slow R functions as they can run in parallel R sessions.
 #' The communication speed between processes is quite slower than between threads.
 #' This will likely only give a speed-up in a "low IO - high CPU" usecase. A
@@ -847,10 +837,10 @@ Expr_map = function(f, output_type = NULL, agg_list = FALSE, in_background = FAL
 #'
 #' # first run in parallel: there is some overhead to start up extra R processes
 #' # drop any previous processes, just to show start-up overhead here
-#' pl$set_options(rpool_cap = 0)
+#' options(polars.rpool_cap = 0)
 #' # set back to 4, the default
-#' pl$set_options(rpool_cap = 4)
-#' pl$options$rpool_cap
+#' options(polars.rpool_cap = 4)
+#' polars_options()$rpool_cap
 #'
 #' system.time({
 #'   pl$LazyFrame(iris)$group_by("Species")$agg(
@@ -862,7 +852,7 @@ Expr_map = function(f, output_type = NULL, agg_list = FALSE, in_background = FAL
 #' })
 #'
 #' # second run in parallel: this reuses R processes in "polars global_rpool".
-#' pl$options$rpool_cap
+#' polars_options()$rpool_cap
 #' system.time({
 #'   pl$LazyFrame(iris)$group_by("Species")$agg(
 #'     pl$all()$map_elements(\(s) {
@@ -884,23 +874,6 @@ Expr_map_elements = function(f, return_type = NULL, strict_return_type = TRUE, a
   # return expression from the functions above, activate agg_list (grouped mapping)
   .pr$Expr$map_batches(self, lambda = wrap_f, output_type = return_type, agg_list = TRUE) |>
     unwrap("in $map_elements():")
-}
-
-Expr_apply = function(f, return_type = NULL, strict_return_type = TRUE,
-                      allow_fail_eval = FALSE, in_background = FALSE) {
-  warning("$apply() is deprecated and will be removed in 0.13.0. Use $map_elements() instead.", call. = FALSE)
-  if (in_background) {
-    return(.pr$Expr$map_elements_in_background(self, f, return_type))
-  }
-
-  # use series apply
-  wrap_f = function(s) {
-    s$map_elements(f, return_type, strict_return_type, allow_fail_eval)
-  }
-
-  # return expression from the functions above, activate agg_list (grouped mapping)
-  .pr$Expr$map_batches(self, lambda = wrap_f, output_type = return_type, agg_list = TRUE) |>
-    unwrap("in $apply():")
 }
 
 #' Create a literal value
@@ -1868,7 +1841,7 @@ Expr_arg_unique = use_extendr_wrapper
 #' @examples
 #' pl$DataFrame(iris)$select(pl$col("Species")$unique())
 Expr_unique = function(maintain_order = FALSE) {
-  if (!is_bool(maintain_order)) stop("param maintain_order must be a bool")
+  if (!is_scalar_bool(maintain_order)) stop("param maintain_order must be a bool")
   if (maintain_order) {
     .pr$Expr$unique_stable(self)
   } else {
@@ -2015,25 +1988,6 @@ Expr_quantile = function(quantile, interpolation = "nearest") {
 Expr_filter = function(predicate) {
   .pr$Expr$filter(self, wrap_e(predicate))
 }
-
-#' @inherit Expr_filter title params return
-#'
-#' @description
-#' This is an alias for `<Expr>$filter()`.
-#'
-#'
-#' @examples
-#' df = pl$DataFrame(
-#'   group_col = c("g1", "g1", "g2"),
-#'   b = c(1, 2, 3)
-#' )
-#' df
-#'
-#' df$group_by("group_col")$agg(
-#'   lt = pl$col("b")$where(pl$col("b") < 2),
-#'   gte = pl$col("b")$where(pl$col("b") >= 2)
-#' )
-Expr_where = Expr_filter
 
 
 #' Explode a list or String Series
@@ -2253,7 +2207,7 @@ Expr_hash = function(seed = 0, seed_1 = NULL, seed_2 = NULL, seed_3 = NULL) {
 #' df = pl$DataFrame(x = 1:5, schema = list(x = pl$Int64))
 #' df$select(pl$all()$reinterpret())
 Expr_reinterpret = function(signed = TRUE) {
-  if (!is_bool(signed)) stop("in reinterpret() : arg signed must be a bool")
+  if (!is_scalar_bool(signed)) stop("in reinterpret() : arg signed must be a bool")
   .pr$Expr$reinterpret(self, signed)
 }
 
@@ -3177,17 +3131,18 @@ Expr_rep_extend = function(expr, n, rechunk = TRUE, upcast = TRUE) {
 #' Otherwise, provide a DataFrame that the Expr should be evaluated in.
 #' @param i Numeric column to extract. Default is zero (which gives the first
 #' column).
+#' @inheritParams DataFrame_to_data_frame
 #' @return R object
 #' @examples
 #' pl$lit(1:3)$to_r()
-Expr_to_r = function(df = NULL, i = 0) {
+Expr_to_r = function(df = NULL, i = 0, ..., int64_conversion = polars_options()$int64_conversion) {
   if (is.null(df)) {
-    pl$select(self)$to_series(i)$to_r()
+    pl$select(self)$to_series(i)$to_r(int64_conversion)
   } else {
     if (!inherits(df, c("RPolarsDataFrame"))) {
       stop("Expr_to_r: input is not NULL or a DataFrame/Lazyframe")
     }
-    df$select(self)$to_series(i)$to_r()
+    df$select(self)$to_series(i)$to_r(int64_conversion)
   }
 }
 
