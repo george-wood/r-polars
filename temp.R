@@ -20,6 +20,7 @@ rd_usage_replace = function(file, pattern, replacement) {
       attr(out, "Rd_tag") = attr_rd_tag
       out
     })
+    attr(content_rd[[which_usage]], "Rd_tag") = "\\usage"
 
     content_rd |>
       as.character(deparse = TRUE) |>
@@ -69,7 +70,7 @@ rd_usage_update = function(files = NULL) {
     patterns$pattern, patterns$replacement,
     \(pattern, replacement) {
       files |>
-        stringr::str_subset(pattern) |>
+        stringr::str_subset(paste0("/", pattern)) |>
         purrr::walk(
           \(file) {
             print(file)
@@ -93,7 +94,7 @@ rd_usage_update = function(files = NULL) {
 
 
 
-future::plan(future::multicore);
+future::plan(future::multisession);
 fs::dir_copy("man", "man_old")
 rd_usage_update()
 source("altdoc/altdoc_preprocessing.R");
