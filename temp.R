@@ -14,9 +14,11 @@ rd_usage_replace = function(file, pattern, replacement) {
   which_usage = which(tags == r"(\usage)")
   if (length(which_usage) > 0) {
     content_rd[[which_usage]] = lapply(content_rd[[which_usage]], function(x) {
-      if (length(x) > 1) return(x)
+      if (length(x) > 1) {
+        return(x)
+      }
       attr_rd_tag = attr(x, "Rd_tag")
-      out = stringr::str_replace_all(x, pattern, replacement)
+      out = gsub(pattern, replacement, x)
       attr(out, "Rd_tag") = attr_rd_tag
       out
     })
@@ -25,7 +27,7 @@ rd_usage_replace = function(file, pattern, replacement) {
     content_rd |>
       as.character(deparse = TRUE) |>
       paste0(collapse = "") |>
-      brio::write_file(file)
+      write(file = file)
   } else {
     return(invisible())
   }
@@ -70,7 +72,7 @@ rd_usage_update = function(files = NULL) {
     patterns$pattern, patterns$replacement,
     \(pattern, replacement) {
       files |>
-        stringr::str_subset(paste0("/", pattern)) |>
+        grep(paste0("/", pattern), x = _, value = TRUE) |>
         purrr::walk(
           \(file) {
             print(file)
@@ -94,11 +96,11 @@ rd_usage_update = function(files = NULL) {
 
 
 
-future::plan(future::multisession);
+future::plan(future::multisession)
 fs::dir_copy("man", "man_old")
 rd_usage_update()
-source("altdoc/altdoc_preprocessing.R");
-altdoc::render_docs(freeze = TRUE, parallel = TRUE, verbose = TRUE);
-source("altdoc/altdoc_postprocessing.R");
+source("altdoc/altdoc_preprocessing.R")
+altdoc::render_docs(freeze = TRUE, parallel = TRUE, verbose = TRUE)
+source("altdoc/altdoc_postprocessing.R")
 fs::dir_delete("man")
 fs::file_move("man_old", "man")
