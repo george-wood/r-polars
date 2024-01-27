@@ -41,52 +41,48 @@ rd_usage_replace = function(file, pattern, replacement) {
 rd_usage_update = function(files = NULL) {
   files = files %||% list.files("man", pattern = r"(.*\.Rd$)", full.names = TRUE, recursive = TRUE)
 
-  patterns = tibble::tribble(
-    ~pattern, ~replacement,
-    "DataFrame_", "<DataFrame>$",
-    "DynamicGroupBy_", "<DynamicGroupBy>$",
-    "Expr_", "<Expr>$",
-    "ExprBin_", "<Expr>$bin$",
-    "ExprCat_", "<Expr>$cat$",
-    "ExprDT_", "<Expr>$dt$",
-    "ExprList_", "<Expr>$list$",
-    "ExprMeta_", "<Expr>$meta$",
-    "ExprName_", "<Expr>$name$",
-    "ExprStr_", "<Expr>$str$",
-    "ExprStruct_", "<Expr>$struct$",
-    "GroupBy_", "<GroupBy>$",
-    "(IO|pl)_read_", "pl$read_", # file names are "IO_read_", function names are "pl_read_"
-    "(IO|pl)_scan_", "pl$scan_", # file names are "IO_scan_", function names are "pl_scan_"
-    "(IO|LazyFrame)_sink_", "<LazyFrame>$sink_", # file names are "IO_sink_", function names are "LazyFrame_sink_"
-    "(IO|DataFrame)_write_", "<DataFrame>$write_", # file names are "IO_write_", function names are "DataFrame_write_"
-    "LazyFrame_", "<LazyFrame>$",
-    "LazyGroupBy_", "<LazyGroupBy>$",
-    "pl_", "pl$",
-    "RField_", "<RField>$",
-    "RThreadHandle_", "<RThreadHandle>$",
-    "Series_", "<Series>$",
-    "SQLContext_", "<SQLContext>$",
-  )
+  patterns = rbind(
+    c("DataFrame_", "<DataFrame>$"),
+    c("DynamicGroupBy_", "<DynamicGroupBy>$"),
+    c("Expr_", "<Expr>$"),
+    c("ExprBin_", "<Expr>$bin$"),
+    c("ExprCat_", "<Expr>$cat$"),
+    c("ExprDT_", "<Expr>$dt$"),
+    c("ExprList_", "<Expr>$list$"),
+    c("ExprMeta_", "<Expr>$meta$"),
+    c("ExprName_", "<Expr>$name$"),
+    c("ExprStr_", "<Expr>$str$"),
+    c("ExprStruct_", "<Expr>$struct$"),
+    c("GroupBy_", "<GroupBy>$"),
+    c("(IO|pl)_read_", "pl$read_"), # file names are "IO_read_", function names are "pl_read_"
+    c("(IO|pl)_scan_", "pl$scan_"), # file names are "IO_scan_", function names are "pl_scan_"
+    c("(IO|LazyFrame)_sink_", "<LazyFrame>$sink_"), # file names are "IO_sink_", function names are "LazyFrame_sink_"
+    c("(IO|DataFrame)_write_", "<DataFrame>$write_"), # file names are "IO_write_", function names are "DataFrame_write_"
+    c("LazyFrame_", "<LazyFrame>$"),
+    c("LazyGroupBy_", "<LazyGroupBy>$"),
+    c("pl_", "pl$"),
+    c("RField_", "<RField>$"),
+    c("RThreadHandle_", "<RThreadHandle>$"),
+    c("Series_", "<Series>$"),
+    c("SQLContext_", "<SQLContext>$")
+  ) |> as.data.frame()
+  names(patterns) = c("pattern", "replacement")
 
-  purrr::walk2(
-    patterns$pattern, patterns$replacement,
-    \(pattern, replacement) {
-      files |>
-        grep(paste0("/", pattern), x = _, value = TRUE) |>
-        purrr::walk(
-          \(file) {
-            print(file)
-            tryCatch(
-              rd_usage_replace(file, pattern, replacement),
-              error = function(e) {
-                print(e)
-                cat("Error updating usage section in ", file, "\n", sep = "")
-              }
-            )
-          }
-        )
+  for (i in 1:nrow(patterns)) {
+    pat = patterns[i, "pattern"]
+    repl = patterns[i, "replacement"]
+    files_with_pattern = grep(paste0("/", pat), x = files, value = TRUE)
+    for (f in files_with_pattern) {
+      print(f)
+      tryCatch(
+        rd_usage_replace(f, pat, repl),
+        error = function(e) {
+          print(e)
+          cat("Error updating usage section in ", f, "\n", sep = "")
+        }
+      )
     }
-  )
+  }
 }
 
 # TODO: remove after R 4.4 released
