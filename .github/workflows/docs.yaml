@@ -24,6 +24,7 @@ on:
     branches:
       - main
     paths:
+      - .github/actions/setup/action.yaml
       - .github/workflows/docs.yaml
       - altdoc/**
       - man/**
@@ -85,9 +86,13 @@ jobs:
         # altdoc uses quarto
       - uses: quarto-dev/quarto-actions/setup@v2
 
+      - uses: r-lib/actions/setup-r-dependencies@v2
+        with:
+          extra-packages: any::rcmdcheck
+          needs: dev,website
+
       - name: Get requirements
         run: |
-          task setup-r-tools
           task setup-python-tools
 
       - name: Build docs
@@ -100,7 +105,7 @@ jobs:
           name: docs
           path: docs
 
-      - uses: webfactory/ssh-agent@v0.8.0
+      - uses: webfactory/ssh-agent@v0.9.0
         env:
           DEPLOY_DOCS: ${{ secrets.DEPLOY_DOCS  }}
         if: ${{ (github.event_name != 'pull_request') && (github.repository_owner == 'pola-rs') }}

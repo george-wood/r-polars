@@ -5,36 +5,43 @@ test_df = data.frame(
   "col_lgl" = rep_len(c(TRUE, FALSE, NA), 10)
 )
 
-make_as_polars_df_cases = function() {
-  tibble::tribble(
-    ~.test_name, ~x,
-    "data.frame", test_df,
-    "polars_lf", pl$LazyFrame(test_df),
-    "polars_group_by", pl$DataFrame(test_df)$group_by("col_int"),
-    "polars_lazy_group_by", pl$LazyFrame(test_df)$group_by("col_int"),
-    "polars_rolling_group_by", pl$DataFrame(test_df)$rolling("col_int", period = "1i"),
-    "polars_lazy_rolling_group_by", pl$LazyFrame(test_df)$rolling("col_int", period = "1i"),
-    "polars_group_by_dynamic", pl$DataFrame(test_df)$group_by_dynamic("col_int", every = "1i"),
-    "polars_lazy_group_by_dynamic", pl$LazyFrame(test_df)$group_by_dynamic("col_int", every = "1i"),
-    "arrow Table", arrow::as_arrow_table(test_df),
-    "arrow RecordBatch", arrow::as_record_batch(test_df),
+if (requireNamespace("arrow", quietly = TRUE) && requireNamespace("nanoarrow", quietly = TRUE)) {
+  make_as_polars_df_cases = function() {
+    tibble::tribble(
+      ~.test_name, ~x,
+      "data.frame", test_df,
+      "polars_lf", pl$LazyFrame(test_df),
+      "polars_group_by", pl$DataFrame(test_df)$group_by("col_int"),
+      "polars_lazy_group_by", pl$LazyFrame(test_df)$group_by("col_int"),
+      "polars_rolling_group_by", pl$DataFrame(test_df)$rolling("col_int", period = "1i"),
+      "polars_lazy_rolling_group_by", pl$LazyFrame(test_df)$rolling("col_int", period = "1i"),
+      "polars_group_by_dynamic", pl$DataFrame(test_df)$group_by_dynamic("col_int", every = "1i"),
+      "polars_lazy_group_by_dynamic", pl$LazyFrame(test_df)$group_by_dynamic("col_int", every = "1i"),
+      "arrow Table", arrow::as_arrow_table(test_df),
+      "arrow RecordBatch", arrow::as_record_batch(test_df),
+      "nanoarrow_array_stream", nanoarrow::as_nanoarrow_array_stream(test_df),
+    )
+  }
+
+  patrick::with_parameters_test_that(
+    "as_polars_df S3 methods",
+    {
+      pl_df = as_polars_df(x)
+      expect_s3_class(pl_df, "RPolarsDataFrame")
+
+      if (inherits(x, "nanoarrow_array_stream")) {
+        # The stream should be released after conversion
+        expect_error(x$get_next(), "already been released")
+      }
+
+      actual = as.data.frame(pl_df)
+      expected = as.data.frame(pl$DataFrame(test_df))
+
+      expect_equal(actual, expected)
+    },
+    .cases = make_as_polars_df_cases()
   )
 }
-
-patrick::with_parameters_test_that("as_polars_df S3 methods",
-  {
-    skip_if_not_installed("arrow")
-
-    pl_df = as_polars_df(x)
-    expect_s3_class(pl_df, "RPolarsDataFrame")
-
-    actual = as.data.frame(pl_df)
-    expected = as.data.frame(pl$DataFrame(test_df))
-
-    expect_equal(actual, expected)
-  },
-  .cases = make_as_polars_df_cases()
-)
 
 
 test_that("as_polars_lf S3 method", {
@@ -92,36 +99,71 @@ test_that("as_polars_df throws error when make_names_unique = FALSE and there ar
 })
 
 
-make_as_polars_series_cases = function() {
-  tibble::tribble(
-    ~.test_name, ~x, ~expected_name,
-    "vector", 1, "",
-    "Series", pl$Series(1, "foo"), "foo",
-    "Expr", pl$lit(1)$alias("foo"), "foo",
-    "list", list(1:4), "",
-    "data.frame", data.frame(x = 1, y = letters[1]), "",
-    "POSIXlt", as.POSIXlt("1900-01-01"), "",
-    "arrow Array", arrow::arrow_array(1), "",
-    "arrow ChunkedArray", arrow::chunked_array(1), "",
+test_that("schema option and schema_overrides for as_polars_df.data.frame", {
+  df = data.frame(a = 1:3, b = 4:6)
+  pl_df_1 = as_polars_df(df, schema = list(a = pl$String, b = pl$Int32))
+  pl_df_2 = as_polars_df(df, schema = c("x", "y"))
+  pl_df_3 = as_polars_df(df, schema_overrides = list(a = pl$String))
+
+  expect_equal(
+    pl_df_1$to_data_frame(),
+    data.frame(a = as.character(1:3), b = 4L:6L)
+  )
+  expect_equal(
+    pl_df_2$to_data_frame(),
+    data.frame(x = 1:3, y = 4:6)
+  )
+  expect_equal(
+    pl_df_3$to_data_frame(),
+    data.frame(a = as.character(1:3), b = 4:6)
+  )
+
+  expect_error(as_polars_df(mtcars, schema = "cyl"), "schema length does not match")
+})
+
+
+if (requireNamespace("arrow", quietly = TRUE) && requireNamespace("nanoarrow", quietly = TRUE)) {
+  make_as_polars_series_cases = function() {
+    tibble::tribble(
+      ~.test_name, ~x, ~expected_name,
+      "vector", 1, "",
+      "Series", pl$Series(1, "foo"), "foo",
+      "Expr", pl$lit(1)$alias("foo"), "foo",
+      "Then", pl$when(TRUE)$then(1), "literal",
+      "ChainedThen", pl$when(FALSE)$then(0)$when(TRUE)$then(1), "literal",
+      "list", list(1:4), "",
+      "data.frame", data.frame(x = 1, y = letters[1]), "",
+      "POSIXlt", as.POSIXlt("1900-01-01"), "",
+      "arrow Array", arrow::arrow_array(1), "",
+      "arrow ChunkedArray", arrow::chunked_array(1), "",
+      "nanoarrow_array", nanoarrow::as_nanoarrow_array(1), "",
+      "nanoarrow_array_stream", nanoarrow::as_nanoarrow_array_stream(data.frame(x = 1)), "",
+    )
+  }
+
+  patrick::with_parameters_test_that(
+    "as_polars_series S3 methods",
+    {
+      pl_series = as_polars_series(x)
+      expect_s3_class(pl_series, "RPolarsSeries")
+
+      expect_identical(length(pl_series), 1L)
+      expect_equal(pl_series$name, expected_name)
+
+      if (inherits(x, "nanoarrow_array_stream")) {
+        # The stream should be released after conversion
+        expect_error(x$get_next(), "already been released")
+
+        # Re-create the stream for the next test
+        x = nanoarrow::as_nanoarrow_array_stream(data.frame(x = 1))
+      }
+
+      pl_series = as_polars_series(x, name = "bar")
+      expect_equal(pl_series$name, "bar")
+    },
+    .cases = make_as_polars_series_cases()
   )
 }
-
-
-patrick::with_parameters_test_that("as_polars_series S3 methods",
-  {
-    skip_if_not_installed("arrow")
-
-    pl_series = as_polars_series(x)
-    expect_s3_class(pl_series, "RPolarsSeries")
-
-    expect_identical(length(pl_series), 1L)
-    expect_equal(pl_series$name, expected_name)
-
-    pl_series = as_polars_series(x, name = "bar")
-    expect_equal(pl_series$name, "bar")
-  },
-  .cases = make_as_polars_series_cases()
-)
 
 
 test_that("tests for vctrs_rcrd", {
@@ -162,9 +204,7 @@ test_that("tests for vctrs_rcrd", {
 
   expect_identical(length(as_polars_series(vec)), 2L)
 
-  # TODO: this should work
-  # https://github.com/pola-rs/r-polars/issues/575
-  # pl$DataFrame(foo = vec)
+  expect_snapshot(pl$DataFrame(foo = vec)$dtypes, cran = TRUE)
 
   expect_identical(
     dim(as_polars_df(tibble::tibble(foo = vec))),
@@ -293,4 +333,96 @@ test_that("can convert an arrow Table contains dictionary<large_string, uint32> 
       bar = factor(c("x", "y", "z"))
     )
   )
+})
+
+make_nanoarrow_array_stream_cases = function() {
+  tibble::tribble(
+    ~.test_name, ~x,
+    "two chunks", nanoarrow::basic_array_stream(list(data.frame(a = 1, b = 2), data.frame(a = NA, b = 1))),
+    "nested", nanoarrow::as_nanoarrow_array_stream(tibble::tibble(a = 1, b = tibble::tibble(c = 3:4, d = 5:6))),
+  )
+}
+
+patrick::with_parameters_test_that("as_polars_df for nanoarrow_array_stream",
+  {
+    skip_if_not_installed("nanoarrow")
+
+    pl_df = as_polars_df(x)
+    expect_s3_class(pl_df, "RPolarsDataFrame")
+    expect_error(x$get_next(), "already been released")
+
+    expect_identical(dim(pl_df), c(2L, 2L))
+  },
+  .cases = make_nanoarrow_array_stream_cases()
+)
+
+patrick::with_parameters_test_that("as_polars_series for nanoarrow_array_stream",
+  {
+    skip_if_not_installed("nanoarrow")
+
+    pl_series = as_polars_series(x)
+    expect_s3_class(pl_series, "RPolarsSeries")
+    expect_error(x$get_next(), "already been released")
+
+    expect_identical(length(pl_series), 2L)
+  },
+  .cases = make_nanoarrow_array_stream_cases()
+)
+
+
+patrick::with_parameters_test_that("clock package class support",
+  {
+    skip_if_not_installed("clock")
+
+    naive_time_chr = c(
+      "1900-01-01T12:34:56.123456789",
+      "2012-01-01T12:34:56.123456789",
+      "2212-01-01T12:34:56.123456789"
+    )
+
+    clock_naive_time = clock::naive_time_parse(naive_time_chr, precision = precision)
+    clock_sys_time = clock::sys_time_parse(naive_time_chr, precision = precision)
+    clock_zoned_time_1 = clock::as_zoned_time(clock_naive_time, "America/New_York")
+
+    pl_naive_time = as_polars_series(clock_naive_time)
+    pl_sys_time = as_polars_series(clock_sys_time)
+    pl_zoned_time_1 = as_polars_series(clock_zoned_time_1)
+
+    expect_s3_class(pl_naive_time, "RPolarsSeries")
+    expect_s3_class(pl_sys_time, "RPolarsSeries")
+    expect_s3_class(pl_zoned_time_1, "RPolarsSeries")
+
+    expect_equal(as.POSIXct(as.vector(pl_naive_time)), as.POSIXct(clock_naive_time))
+    expect_equal(as.POSIXct(as.vector(pl_zoned_time_1)), as.POSIXct(clock_zoned_time_1))
+
+    skip_if(getRversion() < "4.3.0") # The bug of `as.POSIXct(<POSIXct>)` in R 4.2
+    expect_equal(as.POSIXct(as.vector(pl_sys_time)), as.POSIXct(clock_sys_time, tz = "UTC"))
+    expect_equal(
+      as.POSIXct(as.vector(pl_sys_time), tz = "Asia/Kolkata"),
+      as.POSIXct(clock_sys_time, tz = "Asia/Kolkata")
+    )
+
+    # Test on other time zone
+    withr::with_envvar(
+      new = c(TZ = "Europe/Paris"),
+      {
+        expect_equal(as.POSIXct(as.vector(pl_naive_time)), as.POSIXct(clock_naive_time))
+        expect_equal(as.POSIXct(as.vector(pl_zoned_time_1)), as.POSIXct(clock_zoned_time_1))
+        expect_equal(as.POSIXct(as.vector(pl_sys_time)), as.POSIXct(clock_sys_time, tz = "UTC"))
+        expect_equal(
+          as.POSIXct(as.vector(pl_sys_time), tz = "Asia/Kolkata"),
+          as.POSIXct(clock_sys_time, tz = "Asia/Kolkata")
+        )
+      }
+    )
+  },
+  precision = c("nanosecond", "microsecond", "millisecond", "second", "minute", "hour", "day"),
+  .test_name = precision
+)
+
+
+test_that("clock_zoned_time may returns empty time zone", {
+  skip_if_not_installed("clock")
+
+  expect_s3_class(as_polars_series(clock::zoned_time_now(zone = "")), "RPolarsSeries")
 })

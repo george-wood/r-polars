@@ -53,27 +53,25 @@ expected_iris_select_df = structure(list(miah = c(
   -150L
 ))
 
+patrick::with_parameters_test_that("DataFrame, mixed input, create and print",
+  {
+    input_vectors_and_series = list(
+      newname = pl$Series(c(1, 2, 3, 4, 5), name = "b"), # overwrite name b with newname
+      pl$Series((1:5) * 5, "a"),
+      pl$Series(letters[1:5], "b"),
+      c(5, 4, 3, 2, 1), # unnamed vector
+      named_vector = c(15, 14, 13, 12, 11), # named provide
+      c(5, 4, 3, 2, 0)
+    )
 
-# TODO new Cannot understand this error message
-# patrick::with_parameters_test_that("DataFrame, mixed input, create and print",
-#   {
-#     input_vectors_and_series = list(
-#       newname = pl$Series(c(1, 2, 3, 4, 5), name = "b"), # overwrite name b with newname
-#       pl$Series((1:5) * 5, "a"),
-#       pl$Series(letters[1:5], "b"),
-#       c(5, 4, 3, 2, 1), # unnamed vector
-#       named_vector = c(15, 14, 13, 12, 11), # named provide
-#       c(5, 4, 3, 2, 0)
-#     )
-#
-#     # clone into DataFrame and change one name
-#     df = pl$DataFrame(input_vectors_and_series)
-#     .env_var = .value
-#     names(.env_var) = .name
-#     withr::with_envvar(.env_var, expect_snapshot(df))
-#   },
-#   .cases = make_print_cases()
-# )
+    # clone into DataFrame and change one name
+    df = pl$DataFrame(input_vectors_and_series)
+    .env_var = .value
+    names(.env_var) = .name
+    withr::with_envvar(.env_var, expect_snapshot(df))
+  },
+  .cases = make_print_cases()
+)
 
 test_that("DataFrame, input free vectors, input empty", {
   # passing vector directly is equal to passing one
@@ -225,6 +223,22 @@ test_that("select with list of exprs", {
   expect_equal(x6$columns, c("mpg", "hp"))
 })
 
+test_that("select: create a list variable", {
+  test = pl$DataFrame(x = 1:2)
+
+  # create one column
+  expect_identical(
+    test$select(y = list(1:2, 3:4))$to_list(),
+    list(y = list(1:2, 3:4))
+  )
+
+  # create several column
+  expect_identical(
+    test$select(y = list(1:2, 3:4), z = list(c("a", "b"), c("c", "d")))$to_list(),
+    list(y = list(1:2, 3:4), z = list(c("a", "b"), c("c", "d")))
+  )
+})
+
 test_that("map_batches unity", {
   x = pl$
     DataFrame(iris)$
@@ -308,39 +322,55 @@ test_that("cloning", {
   expect_identical(pl$mem_address(pf), pl$mem_address(pf2))
 
   # deep copy clone rust side object, hence not same mem address
-  # For some reason, expect_identical(pf, pf3) fails
   pf3 = pf$clone()
   expect_identical(pf$to_data_frame(), pf3$to_data_frame())
   expect_different(pl$mem_address(pf), pl$mem_address(pf3))
 })
 
+test_that("cloning to avoid giving attributes to original data", {
+  df1 = pl$DataFrame(iris)
 
-# TODO figure out why this test fails. Expected and Actual do appear very much equal
-# test_that("get column(s)", {
-# df = pl$DataFrame(iris)
-# expected_list_of_series = {
-#   expected = lapply(
-#     1:5,
-#     function(i) pl$Series(iris[[i]],names(iris)[i])
-#   )
-#   names(expected) = names(iris)
-#   expected
-# }
-# actual_list_of_series = df$get_columns()
-# for (i in 1:5) {
-#   is_equal = expected_list_of_series[[i]]$equals(actual_list_of_series[[i]])
-#   if (!is_equal) {
-#     fail("series are not equal according to polars internal check")
-#   }
-# }
+  give_attr = function(data) {
+    attr(data, "created_on") = "2024-01-29"
+    data
+  }
+  df2 = give_attr(df1)
+  expect_identical(attributes(df1)$created_on, "2024-01-29")
 
+  give_attr2 = function(data) {
+    data = data$clone()
+    attr(data, "created_on") = "2024-01-29"
+    data
+  }
+  df1 = pl$DataFrame(iris)
+  df2 = give_attr2(df1)
+  expect_null(attributes(df1)$created_on)
+})
 
-# list_of_vectors = lapply(actual_list_of_series, function(x) x$to_vector())
-# expect_identical(
-#   list_of_vectors,
-#   as.list(iris)
-# )
-# })
+test_that("get column(s)", {
+  df = pl$DataFrame(iris)
+  expected_list_of_series = {
+    expected = lapply(
+      1:5,
+      function(i) pl$Series(iris[[i]],names(iris)[i])
+    )
+    names(expected) = names(iris)
+    expected
+  }
+  actual_list_of_series = df$get_columns()
+  for (i in 1:5) {
+    is_equal = expected_list_of_series[[i]]$equals(actual_list_of_series[[i]])
+    if (!is_equal) {
+      fail("series are not equal according to polars internal check")
+    }
+  }
+
+  list_of_vectors = lapply(actual_list_of_series, function(x) x$to_vector())
+  expect_identical(
+    list_of_vectors,
+    as.list(iris)
+  )
+})
 
 
 test_that("get column", {
@@ -359,6 +389,37 @@ test_that("get column", {
 
 # TODO implement series cast and test Series_equal
 
+test_that("with_columns: list or unlisted input", {
+  test = pl$DataFrame(mtcars)
+
+  # one element in $with_columns()
+  expect_identical(
+    test$with_columns(list(a = mtcars$drat))$to_data_frame(),
+    test$with_columns(a = mtcars$drat)$to_data_frame()
+  )
+
+  # several elements
+  expect_identical(
+    test$with_columns(list(a = 1, b = mtcars$drat))$to_data_frame(),
+    test$with_columns(a = 1, b = mtcars$drat)$to_data_frame()
+  )
+})
+
+test_that("with_columns: create a list variable", {
+  test = pl$DataFrame(x = 1:2)
+
+  # create one column
+  expect_identical(
+    test$with_columns(y = list(1:2, 3:4))$to_list(),
+    list(x = 1:2, y = list(1:2, 3:4))
+  )
+
+  # create several column
+  expect_identical(
+    test$with_columns(y = list(1:2, 3:4), z = list(c("a", "b"), c("c", "d")))$to_list(),
+    list(x = 1:2, y = list(1:2, 3:4), z = list(c("a", "b"), c("c", "d")))
+  )
+})
 
 test_that("with_columns lazy/eager", {
   l = list(
@@ -409,7 +470,7 @@ test_that("with_columns lazy/eager", {
 })
 
 
-test_that("limit lazy/eager", {
+test_that("head lazy/eager", {
   l = list(
     a = 1:4,
     b = c(.5, 4, 10, 13),
@@ -420,26 +481,30 @@ test_that("limit lazy/eager", {
   rdf = df$to_data_frame()
 
   expect_identical(
-    df$limit(2)$to_data_frame(),
-    rdf[1:2, ]
+    df$head(2)$to_data_frame(),
+    head(rdf, 2)
   )
 
   expect_identical(
-    ldf$limit(2)$collect()$to_data_frame(),
-    rdf[1:2, ]
+    ldf$head(2)$collect()$to_data_frame(),
+    head(rdf, 2)
+  )
+
+  expect_identical(
+    df$head(-1)$to_data_frame(),
+    head(rdf, -1)
   )
 
   # lazy bounds
-  expect_identical(df$limit(0)$to_data_frame(), rdf[integer(), ])
-  expect_error(ldf$limit(-1))
-  expect_error(ldf$limit(2^32))
-  expect_identical(ldf$limit(2^32 - 1)$collect()$to_data_frame(), rdf)
+  expect_identical(df$head(0)$to_data_frame(), rdf[integer(), ])
+  expect_error(ldf$head(-1))
+  expect_error(ldf$head(2^32))
+  expect_identical(ldf$head(2^32 - 1)$collect()$to_data_frame(), rdf)
 
   # eager bounds
-  expect_identical(ldf$limit(0)$collect()$to_data_frame(), rdf[integer(), ])
-  expect_error(df$limit(-1))
-  expect_error(df$limit(2^32))
-  expect_identical(df$limit(2^32 - 1)$to_data_frame(), rdf)
+  expect_identical(ldf$head(0)$collect()$to_data_frame(), rdf[integer(), ])
+  expect_error(df$head(2^32))
+  expect_identical(df$head(2^32 - 1)$to_data_frame(), rdf)
 })
 
 
@@ -555,11 +620,11 @@ test_that("drop_in_place", {
 
 
 test_that("shift   _and_fill", {
-  a = pl$DataFrame(mtcars)$shift(2)$limit(3)$to_data_frame()
+  a = pl$DataFrame(mtcars)$shift(2)$head(3)$to_data_frame()
   for (i in seq_along(a)) {
     expect_equal(is.na(a[[i]]), c(TRUE, TRUE, FALSE))
   }
-  a = pl$DataFrame(mtcars)$shift_and_fill(0., 2.)$limit(3)$to_data_frame()
+  a = pl$DataFrame(mtcars)$shift_and_fill(0., 2.)$head(3)$to_data_frame()
   for (i in seq_along(a)) {
     expect_equal(a[[i]], c(0, 0, mtcars[[i]][1]))
   }
@@ -716,6 +781,16 @@ test_that("sort", {
   b = df$sort("mpg", nulls_last = FALSE)$to_data_frame()
   expect_true(is.na(a$mpg[32]))
   expect_true(is.na(b$mpg[1]))
+
+  # error if descending is NULL
+  expect_error(
+    df$sort("mpg", descending = NULL),
+    "must be of length 1 or of the same length as `by`"
+  )
+  expect_error(
+    df$sort(c("mpg", "drat"), descending = NULL),
+    "must be of length 1 or of the same length as `by`"
+  )
 })
 
 test_that("dtype_strings", {
@@ -828,73 +903,6 @@ test_that("n_chunks", {
 })
 
 
-test_that("melt example", {
-  df = pl$DataFrame(
-    a = c("x", "y", "z"),
-    b = c(1, 3, 5),
-    c = c(2, 4, 6)
-  )
-
-  expect_identical(
-    df$melt(id_vars = "a", value_vars = c("b", "c"))$to_list(),
-    list(
-      a = c("x", "y", "z", "x", "y", "z"),
-      variable = c("b", "b", "b", "c", "c", "c"),
-      value = c(1, 3, 5, 2, 4, 6)
-    )
-  )
-})
-
-test_that("melt vs data.table::melt", {
-  skip_if_not_installed("data.table")
-  pdf = pl$DataFrame(
-    a = c("x", "y", "z"),
-    b = c(1, 3, 5),
-    c = c(2, 4, 6)
-  )
-
-  rdf = pdf$to_data_frame()
-  dtt = data.table::data.table(rdf)
-
-  melt_mod = \(...) {
-    data.table::melt(variable.factor = FALSE, value.factor = FALSE, ...)
-  }
-
-  expect_identical(
-    pdf$melt(id_vars = "a", value_vars = c("b", "c"))$to_list(),
-    as.list(melt_mod(dtt, id.vars = "a", value_vars = c("b", "c")))
-  )
-  expect_identical(
-    pdf$melt(id_vars = c("c", "b"), value_vars = c("a"))$to_list(),
-    as.list(melt_mod(dtt, id.vars = c("c", "b"), value_vars = c("a")))
-  )
-  expect_identical(
-    pdf$melt(id_vars = c("a", "b"), value_vars = c("c"))$to_list(),
-    as.list(melt_mod(dtt, id.vars = c("a", "b"), value_vars = c("b", "c")))
-  )
-
-
-  expect_identical(
-    pdf$melt(
-      id_vars = c("a", "b"), value_vars = c("c"), value_name = "alice", variable_name = "bob"
-    )$to_list(),
-    as.list(melt_mod(
-      dtt,
-      id.vars = c("a", "b"), value_vars = c("b", "c"), value.name = "alice", variable.name = "bob"
-    ))
-  )
-
-  # check the check, this should not be equal
-  expect_error(expect_equal(
-    pdf$melt(id_vars = c("c", "b"), value_vars = c("a"))$to_list(),
-    as.list(melt_mod(dtt, id.vars = c("a", "b"), value_vars = c("c")))
-  ))
-})
-
-
-
-
-
 test_that("pivot examples", {
   df = pl$DataFrame(
     foo = c("one", "one", "one", "two", "two", "two"),
@@ -956,23 +964,35 @@ test_that("pivot args works", {
 
   # aggr functions
   expect_identical(
-    df$pivot("cat", "ann", "bob", "mean")$to_list(),
+    df$pivot("cat", "ann", "bob", aggregate_function = "mean")$to_list(),
     list(ann = c("one", "two"), A = c(2, 5), B = c(2, 5))
   )
   expect_identical(
-    df$pivot("cat", "ann", "bob", pl$element()$mean())$to_list(),
-    df$pivot("cat", "ann", "bob", "mean")$to_list()
+    df$pivot("cat", "ann", "bob", aggregate_function = pl$element()$mean())$to_list(),
+    df$pivot("cat", "ann", "bob", aggregate_function = "mean")$to_list()
   )
-  expect_grepl_error(df$pivot("cat", "ann", "bob", 42), c("pivot", "param", "aggregate_function", "42"))
-  expect_grepl_error(df$pivot("cat", "ann", "bob", "dummy"), c("pivot", "dummy is not a method"))
+  expect_grepl_error(
+    df$pivot("ann", "bob", "cat", aggregate_function = 42),
+    c("pivot", "param", "aggregate_function", "42")
+  )
+  expect_grepl_error(
+    df$pivot("ann", "bob", "cat", aggregate_function = "dummy"),
+    c("pivot", "dummy is not a method")
+  )
 
   # maintain_order sort_columns
-  expect_grepl_error(df$pivot("cat", "ann", "bob", "mean", 42), c("pivot", "maintain_order", "bool"))
-  expect_grepl_error(df$pivot("cat", "ann", "bob", "mean", TRUE, 42), c("pivot", "sort_columns", "bool"))
+  expect_grepl_error(
+    df$pivot("ann", "bob", "cat", aggregate_function = "mean", maintain_order = 42),
+    c("pivot", "maintain_order", "bool")
+  )
+  expect_grepl_error(
+    df$pivot("ann", "bob", "cat", aggregate_function = "mean", sort_columns = 42),
+    c("pivot", "sort_columns", "bool")
+  )
 
   # separator
-  expect_identical(
-    names(df$pivot(c("ann", "bob"), "ann", "cat", "mean", sep = ".")),
+  expect_named(
+    df$pivot(c("ann", "bob"), "ann", "cat", aggregate_function = "mean", separator = "."),
     c(
       "ann", "ann.cat.1.0", "ann.cat.2.0", "ann.cat.3.0", "ann.cat.4.0",
       "ann.cat.5.0", "ann.cat.6.0", "bob.cat.1.0", "bob.cat.2.0", "bob.cat.3.0",
@@ -1004,16 +1024,19 @@ test_that("rename", {
 
 
 test_that("describe", {
-  df =  pl$DataFrame(
+  df = pl$DataFrame(
     string = c(letters[1:2], NA),
     date = c(as.Date("2024-01-20"), as.Date("2024-01-21"), NA),
-    cat = factor(c(letters[1:2], NA)),
+    cat = factor(c("zz", "a", NA)),
     bool = c(TRUE, FALSE, NA)
   )
   expect_snapshot(df$describe())
   expect_snapshot(pl$DataFrame(mtcars)$describe())
   expect_snapshot(pl$DataFrame(mtcars)$describe(interpolation = "linear"))
   expect_error(pl$DataFrame(mtcars)$describe("not a percentile"))
+
+  # min/max different depending on categorical ordering
+  expect_snapshot(df$select(pl$col("cat")$cast(pl$Categorical("lexical")))$describe())
 
   # perc = NULL  is the same as numeric()
   expect_identical(
@@ -1025,7 +1048,7 @@ test_that("describe", {
   df = pl$DataFrame("foo:bar:jazz" = 1, pl$Series(2, name = ""), "foobar" = 3)
   expect_identical(
     df$describe()$columns,
-    c("describe", df$columns)
+    c("statistic", df$columns)
   )
 })
 
@@ -1080,24 +1103,14 @@ test_that("explode", {
       numbers2 = c(1, NA, 4:8)
     )
   )
-
-  # explode character columns
-  df = pl$DataFrame(
-    letters = c("aa", "bbb", "cccc"),
-    numbers = c(1, 2, 3)
-  )
-  expect_equal(
-    df$explode("letters")$to_data_frame(),
-    data.frame(
-      letters = c(rep("a", 2), rep("b", 3), rep("c", 4)),
-      numbers = c(rep(1, 2), rep(2, 3), rep(3, 4))
-    )
-  )
 })
 
-test_that("with_row_count", {
+test_that("with_row_index", {
   df = pl$DataFrame(mtcars)
-  expect_identical(df$with_row_count("idx", 42)$select(pl$col("idx"))$to_data_frame()$idx, as.double(42:(41 + nrow(mtcars))))
+  expect_identical(
+    df$with_row_index("idx", 42)$select(pl$col("idx"))$to_data_frame()$idx,
+    as.double(42:(41 + nrow(mtcars)))
+  )
 })
 
 test_that("strictly_immutable = FALSE", {
@@ -1263,4 +1276,35 @@ test_that("rolling for DataFrame: can be ungrouped", {
     ungroup()$
     to_data_frame()
   expect_equal(actual, df$to_data_frame())
+})
+
+test_that("flags work", {
+  df = pl$DataFrame(a = c(2, 1), b = c(3, 4), c = list(c(1, 2), 4))
+  expect_identical(
+    df$sort("a")$flags,
+    list(
+      a = list(SORTED_ASC = TRUE, SORTED_DESC = FALSE),
+      b = list(SORTED_ASC = FALSE, SORTED_DESC = FALSE),
+      c = list(SORTED_ASC = FALSE, SORTED_DESC = FALSE, FAST_EXPLODE = FALSE)
+    )
+  )
+  expect_identical(
+    df$with_columns(pl$col("b")$implode())$flags,
+    list(
+      a = list(SORTED_ASC = FALSE, SORTED_DESC = FALSE),
+      b = list(SORTED_ASC = FALSE, SORTED_DESC = FALSE, FAST_EXPLODE = TRUE),
+      c = list(SORTED_ASC = FALSE, SORTED_DESC = FALSE, FAST_EXPLODE = TRUE)
+    )
+  )
+
+  df = pl$DataFrame(
+    a = list(c(1, 2), c(4, 5)),
+    schema = list(a = pl$Array(pl$Float64, 2))
+  )
+  expect_identical(
+    df$flags,
+    list(
+      a = list(SORTED_ASC = FALSE, SORTED_DESC = FALSE, FAST_EXPLODE = FALSE)
+    )
+  )
 })

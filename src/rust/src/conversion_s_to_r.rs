@@ -1,24 +1,9 @@
-use crate::rdataframe::RPolarsDataFrame;
+use crate::{rdataframe::RPolarsDataFrame, robj_to};
 use extendr_api::prelude::*;
 use pl::PolarsError as pl_error;
 use polars::prelude::{self as pl};
 use polars_core::datatypes::DataType;
-
-// #[extendr]
-// fn hello_bit64() -> Robj {
-//     let i64_vec = vec![1i64, 2, 3, 4, 14503599627370496];
-//     let robj = i64_vec
-//         .into_iter()
-//         .map(|x| {
-//             let x = unsafe { std::mem::transmute::<i64, f64>(x) };
-//             x
-//         })
-//         .collect_robj();
-
-//     robj.set_class(&["integer64"]).unwrap();
-
-//     robj
-// }
+use polars_lazy::{dsl::col, frame::IntoLazy};
 
 //TODO throw a warning if i32 contains a lowerbound value which is the NA in R.
 pub fn pl_series_to_list(
@@ -51,12 +36,12 @@ pub fn pl_series_to_list(
                 "bit64" => s.i64().map(|ca| {
                     ca.into_iter()
                         .map(|opt| match opt {
-                            Some(x) if x != crate::utils::BIT64_NA_ECODING => {
+                            Some(x) if x != crate::utils::BIT64_NA_ENCODING => {
                                 let x = f64::from_bits(x as u64);
                                 Some(x)
                             }
                             _ => {
-                                let x = crate::utils::BIT64_NA_ECODING;
+                                let x = crate::utils::BIT64_NA_ENCODING;
                                 let x = f64::from_bits(x as u64);
                                 Some(x)
                             }
@@ -87,7 +72,7 @@ pub fn pl_series_to_list(
             //                 Some(x)
             //             }
             //             _ => {
-            //                 let x = crate::utils::BIT64_NA_ECODING;
+            //                 let x = crate::utils::BIT64_NA_ENCODING;
             //                 let x = unsafe { std::mem::transmute::<i64, f64>(x) };
             //                 Some(x)
             //             }
@@ -156,6 +141,30 @@ pub fn pl_series_to_list(
                 let l = extendr_api::List::from_iter(v.iter());
                 Ok(l.into_robj())
             }
+            Array(_, _) => {
+                let mut v: Vec<extendr_api::Robj> = Vec::with_capacity(s.len());
+                let ca = s.array().unwrap();
+
+                for opt_s in ca.amortized_iter() {
+                    match opt_s {
+                        Some(s) => {
+                            let s_ref = s.as_ref();
+                            // is safe because s is read to generate new Robj, then discarded.
+                            let inner_val =
+                                to_list_recursive(s_ref, tag_structs, int64_conversion)?;
+                            v.push(inner_val);
+                        }
+
+                        None => {
+                            v.push(r!(extendr_api::NULL));
+                        }
+                    }
+                }
+                //TODO let l = extendr_api::List::from_values(v); or see if possible to skip vec allocation
+                //or take ownership of vector
+                let l = extendr_api::List::from_iter(v.iter());
+                Ok(l.into_robj())
+            }
             Struct(_) => {
                 let df = s.clone().into_frame().unnest([s.name()]).unwrap();
                 let mut l = RPolarsDataFrame(df).to_list_result(int64_conversion)?;
@@ -204,9 +213,31 @@ pub fn pl_series_to_list(
                     pl::TimeUnit::Milliseconds => 1_000.0,
                 };
 
-                //resolve timezone
-                let tz = opt_tz.as_ref().map(|s| s.as_str()).unwrap_or("");
-                s.cast(&Float64)?
+                let zoned_s: pl::Series = match opt_tz {
+                    Some(_tz) => {
+                        // zoned time
+                        s.clone()
+                    }
+                    None => {
+                        // naive time
+                        let sys_tz_robj = R!("Sys.timezone()")
+                            .map_err(|err| pl::PolarsError::ComputeError(err.to_string().into()))?;
+                        let sys_tz = robj_to!(String, sys_tz_robj)
+                            .map_err(|err| pl::PolarsError::ComputeError(err.to_string().into()))?;
+                        let s_name = s.name();
+                        pl::DataFrame::new(vec![s.clone()])?
+                            .lazy()
+                            .select([col(s_name)
+                                .dt()
+                                .replace_time_zone(Some(sys_tz), pl::lit("raise"))])
+                            .collect()?
+                            .column(s_name)?
+                            .clone()
+                    }
+                };
+
+                zoned_s
+                    .cast(&Float64)?
                     .f64()
                     .map(|ca| {
                         ca.into_iter()
@@ -218,7 +249,9 @@ pub fn pl_series_to_list(
                         robj.set_class(&["POSIXct", "POSIXt"])
                             .expect("internal error: class POSIXct label failed")
                     })
-                    .map(|mut robj| robj.set_attrib("tzone", tz))
+                    .map(|mut robj| {
+                        robj.set_attrib("tzone", opt_tz.as_ref().map(|s| s.as_str()).unwrap_or(""))
+                    })
                     .expect("internal error: attr tzone failed")
                     .map_err(|err| {
                         pl_error::ComputeError(

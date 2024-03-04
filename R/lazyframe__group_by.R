@@ -1,11 +1,25 @@
-#' @title Operations on Polars grouped LazyFrame
-#' @return not applicable
-#' @details The LazyGroupBy class in R, is just another interface on top of the
-#'   LazyFrame (R wrapper class) in rust polars.
+#' Operations on Polars grouped LazyFrame
+#'
+#' This class comes from [`<LazyFrame>$group_by()`][LazyFrame_group_by], etc.
+#'
+#' @section Active bindings:
+#'
+#' ## columns
+#'
+#' `$columns` returns a character vector with the column names.
 #'
 #' @name LazyGroupBy_class
+#' @aliases RPolarsLazyGroupBy
+#' @examples
+#' as_polars_lf(mtcars)$group_by("cyl")$agg(
+#'   pl$col("mpg")$sum()
+#' )
 NULL
 
+
+# Active bindings
+
+LazyGroupBy_columns = method_as_active_binding(\() self$ungroup()$columns)
 
 
 #' print LazyGroupBy
@@ -20,6 +34,19 @@ print.RPolarsLazyGroupBy = function(x, ...) {
   cat("polars LazyGroupBy: \n")
   x$print()
 }
+
+
+#' @title auto complete $-access into a polars object
+#' @description called by the interactive R session internally
+#' @param x GroupBy
+#' @param pattern token as string to filter methods by
+#' @return char vec
+#' @export
+#' @noRd
+.DollarNames.RPolarsLazyGroupBy = function(x, pattern = "") {
+  paste0(ls(RPolarsLazyGroupBy, pattern = pattern), completion_symbols$method)
+}
+
 
 #' @title LazyGroupBy_agg
 #' @description

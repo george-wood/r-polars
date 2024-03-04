@@ -1,6 +1,7 @@
-#' @title Inner workings of the LazyFrame-class
+#' Inner workings of the LazyFrame-class
 #'
 #' @name LazyFrame_class
+#' @aliases RPolarsLazyFrame
 #' @description The `LazyFrame`-class is simply two environments of respectively
 #' the public and private methods/function calls to the polars rust side. The
 #' instantiated `LazyFrame`-object is an `externalptr` to a lowlevel rust polars
@@ -27,7 +28,25 @@
 #' and projection pushdown. However polars can interact and optimize queries with both
 #' SQL DBs and other data sources such parquet files simultaneously.
 #'
-#' @return not applicable
+#' @section Active bindings:
+#'
+#' ## columns
+#'
+#' `$columns` returns a character vector with the column names.
+#'
+#' ## dtypes
+#'
+#' `$dtypes` returns a unnamed list with the [data type][pl_dtypes] of each column.
+#'
+#' ## schema
+#'
+#' `$schema` returns a named list with the [data type][pl_dtypes] of each column.
+#'
+#' ## width
+#'
+#' `$width` returns the number of columns in the LazyFrame.
+#'
+#' @inheritSection DataFrame_class Conversion to R data types considerations
 #' @keywords LazyFrame
 #' @examples
 #' # see all exported methods
@@ -50,7 +69,7 @@
 #' Rdf = read.csv(temp_filepath)
 #'
 #' # eager in-mem polars DataFrame
-#' Pdf = pl$DataFrame(Rdf)
+#' Pdf = as_polars_df(Rdf)
 #'
 #' # lazy frame starting from in-mem DataFrame
 #' Ldf_okay = Pdf$lazy()
@@ -93,6 +112,40 @@
 NULL
 
 
+# Active bindings
+
+LazyFrame_columns = method_as_active_binding(
+  \() {
+    self$schema |>
+      names() |>
+      result() |>
+      unwrap("in $columns")
+  }
+)
+
+
+LazyFrame_dtypes = method_as_active_binding(
+  \() {
+    self$schema |>
+      unlist() |>
+      unname() |>
+      result() |>
+      unwrap("in $dtypes")
+  }
+)
+
+
+LazyFrame_schema = method_as_active_binding(
+  \() {
+    .pr$LazyFrame$schema(self) |>
+      unwrap("in $schema:")
+  }
+)
+
+
+LazyFrame_width = method_as_active_binding(\() length(self$schema))
+
+
 #' @title auto complete $-access into a polars object
 #' @description called by the interactive R session internally
 #' @param x LazyFrame
@@ -103,7 +156,7 @@ NULL
 #' @noRd
 
 .DollarNames.RPolarsLazyFrame = function(x, pattern = "") {
-  paste0(ls(RPolarsLazyFrame, pattern = pattern), "()")
+  paste0(ls(RPolarsLazyFrame, pattern = pattern), completion_symbols$method)
 }
 
 #' Create new LazyFrame
@@ -156,7 +209,10 @@ pl_LazyFrame = function(...) {
 #'
 #' @examples pl$LazyFrame(iris)
 print.RPolarsLazyFrame = function(x, ...) {
-  print("polars LazyFrame naive plan: (run ldf$describe_optimized_plan() to see the optimized plan)")
+  cat("polars LazyFrame\n")
+  cat(" $describe_optimized_plan() : Show the optimized query plan.\n")
+  cat("\n")
+  cat("Naive plan:\n")
   cloned_x = .pr$LazyFrame$print(x)
   invisible(cloned_x)
 }
@@ -243,19 +299,26 @@ LazyFrame_with_columns = function(...) {
 }
 
 
-#' @inherit DataFrame_with_row_count title description params
+#' @inherit DataFrame_with_row_index title description params
 #' @return A new LazyFrame with a counter column in front
 #' @docType NULL
 #' @examples
 #' df = pl$LazyFrame(mtcars)
 #'
 #' # by default, the index starts at 0 (to mimic the behavior of Python Polars)
-#' df$with_row_count("idx")
+#' df$with_row_index("idx")
 #'
 #' # but in R, we use a 1-index
-#' df$with_row_count("idx", offset = 1)
+#' df$with_row_index("idx", offset = 1)
+LazyFrame_with_row_index = function(name, offset = NULL) {
+  .pr$LazyFrame$with_row_index(self, name, offset) |>
+    unwrap("in $with_row_index():")
+}
+
 LazyFrame_with_row_count = function(name, offset = NULL) {
-  .pr$LazyFrame$with_row_count(self, name, offset) |> unwrap()
+  warning("`$with_row_count()` is deprecated and will be removed in 0.15.0. Use `with_row_index()` instead.")
+  .pr$LazyFrame$with_row_index(self, name, offset) |>
+    unwrap("in $with_row_count():")
 }
 
 #' Apply filter to LazyFrame
@@ -490,6 +553,8 @@ LazyFrame_collect_in_background = function() {
 #' smaller chunks may reduce memory pressure and improve writing speeds.
 #' @param data_pagesize_limit `NULL` or Integer. If `NULL` (default), the limit
 #' will be ~1MB.
+#' @param maintain_order Maintain the order in which data is processed. Setting
+#' this to `FALSE` will be slightly faster.
 #' @inheritParams LazyFrame_group_by
 #' @inheritParams DataFrame_unique
 #' @inheritParams LazyFrame_collect
@@ -567,6 +632,7 @@ LazyFrame_sink_parquet = function(
 #' @param compression `NULL` or string, the compression method. One of `NULL`,
 #' "lz4" or "zstd". Choose "zstd" for good compression performance. Choose "lz4"
 #' for fast compression/decompression.
+#' @inheritParams LazyFrame_sink_parquet
 #' @inheritParams LazyFrame_collect
 #' @inheritParams LazyFrame_group_by
 #' @inheritParams DataFrame_unique
@@ -634,6 +700,7 @@ LazyFrame_sink_ipc = function(
 #' larger than RAM as it would crash the R session if it was collected into R.
 #'
 #' @inheritParams DataFrame_write_csv
+#' @inheritParams LazyFrame_sink_parquet
 #' @inheritParams LazyFrame_collect
 #' @inheritParams LazyFrame_group_by
 #' @inheritParams DataFrame_unique
@@ -723,6 +790,7 @@ LazyFrame_sink_csv = function(
 #' larger than RAM as it would crash the R session if it was collected into R.
 #'
 #' @inheritParams DataFrame_write_csv
+#' @inheritParams LazyFrame_sink_parquet
 #' @inheritParams LazyFrame_collect
 #' @inheritParams LazyFrame_group_by
 #' @inheritParams DataFrame_unique
@@ -777,23 +845,30 @@ LazyFrame_sink_ndjson = function(
 }
 
 
-#' @title Limit a LazyFrame
-#' @inherit DataFrame_limit description params details
-#' @return A `LazyFrame`
-#' @examples pl$LazyFrame(mtcars)$limit(4)$collect()
-LazyFrame_limit = function(n) {
-  unwrap(.pr$LazyFrame$limit(self, n), "in $limit():")
-}
-
-#' @title Head of a LazyFrame
-#' @inherit DataFrame_head description params details
+#' Get the first `n` rows.
 #'
-#' @examples pl$LazyFrame(mtcars)$head(4)$collect()
+#' A shortcut for [`$slice(0, n)`][LazyFrame_slice].
+#' Consider using the [`$fetch()`][LazyFrame_fetch] method if you want to test your query.
+#' The [`$fetch()`][LazyFrame_fetch] operation will load the first `n` rows at
+#' the scan level, whereas `$head()` is applied at the end.
+#'
+#' `$limit()` is an alias for `$head()`.
+#' @param n Number of rows to return.
+#' @inherit LazyFrame_slice return
+#' @examples
+#' lf = pl$LazyFrame(a = 1:6, b = 7:12)
+#'
+#' lf$head()$collect()
+#'
+#' lf$head(2)$collect()
 #' @return A new `LazyFrame` object with applied filter.
-
-LazyFrame_head = function(n) {
-  unwrap(.pr$LazyFrame$limit(self, n), "in $head():")
+LazyFrame_head = function(n = 5L) {
+  result(self$slice(0, n)) |>
+    unwrap("in $head():")
 }
+
+LazyFrame_limit = LazyFrame_head
+
 
 #' @title Get the first row of a LazyFrame
 #' @keywords DataFrame
@@ -966,6 +1041,7 @@ LazyFrame_reverse = use_extendr_wrapper
 #' @title Slice
 #' @description Get a slice of the LazyFrame.
 #' @inheritParams DataFrame_slice
+#' @return A [LazyFrame][LazyFrame_class]
 #' @examples
 #' pl$LazyFrame(mtcars)$slice(2, 4)$collect()
 #' pl$LazyFrame(mtcars)$slice(30)$collect()
@@ -974,11 +1050,18 @@ LazyFrame_slice = function(offset, length = NULL) {
   unwrap(.pr$LazyFrame$slice(self, offset, length), "in $slice():")
 }
 
-#' @title Tail of a DataFrame
-#' @inherit DataFrame_tail description params details
-#' @return A LazyFrame
-#' @examples pl$LazyFrame(mtcars)$tail(2)$collect()
-LazyFrame_tail = function(n) {
+#' Get the last `n` rows.
+#'
+#' @inherit LazyFrame_head return params
+#' @inheritParams LazyFrame_head
+#' @seealso [`<LazyFrame>$head()`][LazyFrame_head]
+#' @examples
+#' lf = pl$LazyFrame(a = 1:6, b = 7:12)
+#'
+#' lf$tail()$collect()
+#'
+#' lf$tail(2)$collect()
+LazyFrame_tail = function(n = 5L) {
   unwrap(.pr$LazyFrame$tail(self, n), "in $tail():")
 }
 
@@ -1019,7 +1102,10 @@ LazyFrame_drop_nulls = function(subset = NULL) {
 #'
 #' # only keep unique rows
 #' df$unique(keep = "none")
-LazyFrame_unique = function(subset = NULL, keep = "first", maintain_order = FALSE) {
+LazyFrame_unique = function(
+    subset = NULL,
+    keep = c("first", "last", "none"),
+    maintain_order = FALSE) {
   unwrap(.pr$LazyFrame$unique(self, subset, keep, maintain_order), "in unique():")
 }
 
@@ -1028,23 +1114,38 @@ LazyFrame_unique = function(subset = NULL, keep = "first", maintain_order = FALS
 #' the group structure. This structure can then be used by several functions
 #' (`$agg()`, `$filter()`, etc.).
 #' @keywords LazyFrame
-#' @param ... Any Expr(s) or string(s) naming a column.
-#' @param maintain_order Keep the same order as the original `LazyFrame`. Setting
-#'  this to `TRUE` makes it more expensive to compute and blocks the possibility
-#'  to run on the streaming engine. The default value can be changed with
-#' `options(polars.maintain_order = TRUE)`.
-#' @return LazyGroupBy (a LazyFrame with special groupby methods like `$agg()`)
+#' @param ... Column(s) to group by.
+#' Accepts [expression][Expr_class] input. Characters are parsed as column names.
+#' @param maintain_order Ensure that the order of the groups is consistent with the input data.
+#' This is slower than a default group by.
+#' Setting this to `TRUE` blocks the possibility to run on the streaming engine.
+#' The default value can be changed with `options(polars.maintain_order = TRUE)`.
+#' @return [LazyGroupBy][LazyGroupBy_class] (a LazyFrame with special groupby methods like `$agg()`)
 #' @examples
-#' pl$LazyFrame(
-#'   foo = c("one", "two", "two", "one", "two"),
-#'   bar = c(5, 3, 2, 4, 1)
-#' )$
-#'   group_by("foo")$
-#'   agg(
-#'   pl$col("bar")$sum()$name$suffix("_sum"),
-#'   pl$col("bar")$mean()$alias("bar_tail_sum")
-#' )$
-#'   collect()
+#' lf = pl$LazyFrame(
+#'   a = c("a", "b", "a", "b", "c"),
+#'   b = c(1, 2, 1, 3, 3),
+#'   c = c(5, 4, 3, 2, 1)
+#' )
+#'
+#' lf$group_by("a")$agg(pl$col("b")$sum())$collect()
+#'
+#' # Set `maintain_order = TRUE` to ensure the order of the groups is consistent with the input.
+#' lf$group_by("a", maintain_order = TRUE)$agg(pl$col("c"))$collect()
+#'
+#' # Group by multiple columns by passing a list of column names.
+#' lf$group_by(c("a", "b"))$agg(pl$max("c"))$collect()
+#'
+#' # Or pass some arguments to group by multiple columns in the same way.
+#' # Expressions are also accepted.
+#' lf$group_by("a", pl$col("b") %/% 2)$agg(
+#'   pl$col("c")$mean()
+#' )$collect()
+#'
+#' # The columns will be renamed to the argument names.
+#' lf$group_by(d = "a", e = pl$col("b") %/% 2)$agg(
+#'   pl$col("c")$mean()
+#' )$collect()
 LazyFrame_group_by = function(..., maintain_order = polars_options()$maintain_order) {
   .pr$LazyFrame$group_by(self, unpack_list(..., .context = "in $group_by():"), maintain_order) |>
     unwrap("in $group_by():")
@@ -1153,8 +1254,9 @@ LazyFrame_join = function(
 #' either of length 1 or a logical vector of the same length as the number of
 #' Expr(s) specified in `by` and `...`.
 #' @param nulls_last Boolean. Place `NULL`s at the end? Default is `FALSE`.
-#' @inheritParams LazyFrame_group_by
-#' @inheritParams DataFrame_unique
+#' @param maintain_order Whether the order should be maintained if elements are
+#' equal. If `TRUE`, streaming is not possible and performance might be worse
+#' since this requires a stable search.
 #' @return LazyFrame
 #' @keywords  LazyFrame
 #' @examples
@@ -1169,9 +1271,9 @@ LazyFrame_join = function(
 #' df$sort(c("cyl", "mpg"), descending = c(TRUE, FALSE))$collect()
 #' df$sort(pl$col("cyl"), pl$col("mpg"))$collect()
 LazyFrame_sort = function(
-    by, # : IntoExpr | List[IntoExpr],
-    ..., # unnamed Into expr
-    descending = FALSE, #  bool | vector[bool] = False,
+    by,
+    ...,
+    descending = FALSE,
     nulls_last = FALSE,
     maintain_order = FALSE) {
   .pr$LazyFrame$sort_by_exprs(
@@ -1275,7 +1377,7 @@ LazyFrame_join_asof = function(
     by_left = NULL,
     by_right = NULL,
     by = NULL,
-    strategy = "backward",
+    strategy = c("backward", "forward", "nearest"),
     suffix = "_right",
     tolerance = NULL,
     allow_parallel = TRUE,
@@ -1363,52 +1465,6 @@ LazyFrame_rename = function(...) {
   new = names(mapping)
   unwrap(.pr$LazyFrame$rename(self, existing, new), "in $rename():")
 }
-
-#' @rdname LazyFrame_dtypes
-
-LazyFrame_schema = method_as_property(function() {
-  .pr$LazyFrame$schema(self) |>
-    unwrap("in $schema():")
-})
-
-#' Get the column names of a LazyFrame
-#' @keywords LazyFrame
-#' @return A vector of column names
-#' @examples
-#' pl$LazyFrame(mtcars)$columns
-LazyFrame_columns = method_as_property(function() {
-  self$schema |>
-    names() |>
-    result() |>
-    unwrap("in $columns()")
-})
-
-#' @title Number of columns of a LazyFrame
-#' @description Get the number of columns (width) of a LazyFrame
-#' @keywords LazyFrame
-#' @return The number of columns of a DataFrame
-#' @examples
-#' pl$LazyFrame(mtcars)$width
-#'
-LazyFrame_width = method_as_property(function() {
-  length(self$schema)
-})
-
-#' Data types information
-#' @name LazyFrame_dtypes
-#' @inherit DataFrame_dtypes description return
-#' @keywords LazyFrame
-#' @examples
-#' pl$LazyFrame(iris)$dtypes
-#'
-#' pl$LazyFrame(iris)$schema
-LazyFrame_dtypes = method_as_property(function() {
-  self$schema |>
-    unlist() |>
-    unname() |>
-    result() |>
-    unwrap("in $dtypes()")
-})
 
 
 #' Fetch `n` rows of a LazyFrame
@@ -1607,7 +1663,7 @@ LazyFrame_profile = function(
 #' `"name"` is implicitly converted to `pl$col("name")`.
 #'
 #' @details
-#' Only columns of DataType `List` or `String` can be exploded.
+#' Only columns of DataType `List` or `Array` can be exploded.
 #'
 #' Named expressions like `$explode(a = pl$col("b"))` will not implicitly trigger
 #' `$alias("a")` here, due to only variant `Expr::Column` is supported in
@@ -1625,9 +1681,6 @@ LazyFrame_profile = function(
 #' # explode a single column, append others
 #' df$explode("numbers")$collect()
 #'
-#' # it is also possible to explode a character column to have one letter per row
-#' df$explode("letters")
-#'
 #' # explode two columns of same nesting structure, by names or the common dtype
 #' # "List(Float64)"
 #' df$explode("numbers", "numbers_2")$collect()
@@ -1640,18 +1693,37 @@ LazyFrame_explode = function(...) {
 
 #' Clone a LazyFrame
 #'
-#' @description This makes a very cheap deep copy/clone of an existing `LazyFrame`.
+#' This makes a very cheap deep copy/clone of an existing
+#' [`LazyFrame`][LazyFrame_class]. Rarely useful as `LazyFrame`s are nearly 100%
+#' immutable. Any modification of a `LazyFrame` should lead to a clone anyways,
+#' but this can be useful when dealing with attributes (see examples).
+#'
+#'
 #' @return A LazyFrame
 #' @examples
 #' df1 = pl$LazyFrame(iris)
-#' df2 = df1$clone()
-#' df3 = df1
 #'
-#' # the clone and the original don't have the same address...
-#' pl$mem_address(df1) != pl$mem_address(df2)
+#' # Make a function to take a LazyFrame, add an attribute, and return a LazyFrame
+#' give_attr = function(data) {
+#'   attr(data, "created_on") = "2024-01-29"
+#'   data
+#' }
+#' df2 = give_attr(df1)
 #'
-#' # ... but simply assigning df1 to df3 change the address anyway
-#' pl$mem_address(df1) == pl$mem_address(df3)
+#' # Problem: the original LazyFrame also gets the attribute while it shouldn't!
+#' attributes(df1)
+#'
+#' # Use $clone() inside the function to avoid that
+#' give_attr = function(data) {
+#'   data = data$clone()
+#'   attr(data, "created_on") = "2024-01-29"
+#'   data
+#' }
+#' df1 = pl$LazyFrame(iris)
+#' df2 = give_attr(df1)
+#'
+#' # now, the original LazyFrame doesn't get this attribute
+#' attributes(df1)
 LazyFrame_clone = function() {
   .pr$LazyFrame$clone_in_rust(self)
 }
@@ -1790,8 +1862,7 @@ LazyFrame_rolling = function(
 #'   time = pl$date_range(
 #'     start = strptime("2021-12-16 00:00:00", format = "%Y-%m-%d %H:%M:%S", tz = "UTC"),
 #'     end = strptime("2021-12-16 03:00:00", format = "%Y-%m-%d %H:%M:%S", tz = "UTC"),
-#'     interval = "30m",
-#'     eager = TRUE,
+#'     interval = "30m"
 #'   ),
 #'   n = 0:6
 #' )

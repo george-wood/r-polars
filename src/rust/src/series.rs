@@ -17,7 +17,7 @@ use crate::rpolarserr::RResult;
 use crate::utils::wrappers::null_to_opt;
 use crate::utils::{r_error_list, r_result_list};
 
-use extendr_api::{extendr, prelude::*, rprintln, Rinternals};
+use extendr_api::{extendr, prelude::*, rprintln};
 use pl::SeriesMethods;
 use polars::datatypes::*;
 use polars::prelude as pl;
@@ -25,8 +25,6 @@ use polars::prelude::ArgAgg;
 use polars::prelude::IntoSeries;
 pub const R_INT_NA_ENC: i32 = -2147483648;
 use crate::rpolarserr::polars_to_rpolars_err;
-use polars::prelude::RoundSeries;
-use std::convert::TryInto;
 use std::result::Result;
 
 #[derive(Debug, Clone)]
@@ -107,8 +105,8 @@ impl RPolarsSeries {
         self.0.name()
     }
 
-    pub fn sort_mut(&mut self, descending: bool) -> Self {
-        RPolarsSeries(self.0.sort(descending))
+    pub fn sort_mut(&mut self, descending: bool, nulls_last: bool) -> Self {
+        RPolarsSeries(self.0.sort(descending, nulls_last))
     }
 
     pub fn value_counts(
@@ -130,14 +128,22 @@ impl RPolarsSeries {
         self.0.arg_max()
     }
 
-    pub fn is_sorted_flag(&self) -> bool {
-        matches!(self.0.is_sorted_flag(), polars::series::IsSorted::Ascending)
+    pub fn fast_explode_flag(&self) -> bool {
+        self.0
+            .get_flags()
+            .contains(polars::chunked_array::Settings::FAST_EXPLODE_LIST)
     }
+
+    pub fn is_sorted_flag(&self) -> bool {
+        self.0
+            .get_flags()
+            .contains(polars::chunked_array::Settings::SORTED_ASC)
+    }
+
     pub fn is_sorted_reverse_flag(&self) -> bool {
-        matches!(
-            self.0.is_sorted_flag(),
-            polars::series::IsSorted::Descending
-        )
+        self.0
+            .get_flags()
+            .contains(polars::chunked_array::Settings::SORTED_DSC)
     }
 
     pub fn is_sorted(&self, descending: Robj) -> RResult<bool> {
@@ -251,12 +257,6 @@ impl RPolarsSeries {
         self.0.chunk_lengths().map(|val| val as f64).collect()
     }
 
-    pub fn abs(&self) -> RResult<RPolarsSeries> {
-        pl::abs(&self.0)
-            .map_err(polars_to_rpolars_err)
-            .map(RPolarsSeries)
-    }
-
     pub fn alias(&self, name: &str) -> RPolarsSeries {
         let mut s = self.0.clone();
         s.rename(name);
@@ -301,6 +301,15 @@ impl RPolarsSeries {
         }
     }
 
+    pub fn append_mut(&mut self, other: &RPolarsSeries) -> List {
+        r_result_list(
+            self.0
+                .append(&other.0)
+                .map(|_| ())
+                .map_err(|err| format!("{:?}", err)),
+        )
+    }
+
     pub fn add(&self, other: &RPolarsSeries) -> Self {
         (&self.0 + &other.0).into()
     }
@@ -319,15 +328,6 @@ impl RPolarsSeries {
 
     pub fn rem(&self, other: &RPolarsSeries) -> Self {
         (&self.0 % &other.0).into()
-    }
-
-    pub fn append_mut(&mut self, other: &RPolarsSeries) -> List {
-        r_result_list(
-            self.0
-                .append(&other.0)
-                .map(|_| ())
-                .map_err(|err| format!("{:?}", err)),
-        )
     }
 
     pub fn map_elements(
@@ -477,32 +477,8 @@ impl RPolarsSeries {
         RPolarsSeries(s).to_r("double")
     }
 
-    pub fn ceil(&self) -> List {
-        r_result_list(
-            self.0
-                .ceil()
-                .map(RPolarsSeries)
-                .map_err(|err| format!("{:?}", err)),
-        )
-    }
-
-    pub fn floor(&self) -> List {
-        r_result_list(
-            self.0
-                .floor()
-                .map(RPolarsSeries)
-                .map_err(|err| format!("{:?}", err)),
-        )
-    }
-
     pub fn print(&self) {
         rprintln!("{:#?}", self.0);
-    }
-
-    pub fn cum_sum(&self, reverse: bool) -> RResult<RPolarsSeries> {
-        pl::cum_sum(&self.0, reverse)
-            .map_err(polars_to_rpolars_err)
-            .map(RPolarsSeries)
     }
 
     pub fn to_frame(&self) -> std::result::Result<RPolarsDataFrame, String> {
@@ -519,8 +495,16 @@ impl RPolarsSeries {
         };
     }
 
-    pub fn from_arrow(name: &str, array: Robj) -> Result<Self, String> {
-        let arr = crate::arrow_interop::to_rust::arrow_array_to_rust(array, None)?;
+    pub fn from_arrow_array_stream_str(name: Robj, robj_str: Robj) -> RResult<Robj> {
+        let name = robj_to!(str, name)?;
+        let s = crate::arrow_interop::to_rust::arrow_stream_to_series_internal(robj_str)?
+            .with_name(name);
+        Ok(RPolarsSeries(s).into_robj())
+    }
+
+    pub fn from_arrow_array_robj(name: Robj, array: Robj) -> Result<Self, String> {
+        let name = robj_to!(str, name)?;
+        let arr = crate::arrow_interop::to_rust::arrow_array_to_rust(array)?;
 
         match arr.data_type() {
             ArrowDataType::LargeList(_) => {
@@ -592,7 +576,7 @@ impl RPolarsSeries {
         Ok(RPolarsSeries(s))
     }
 
-    pub fn into_frame(&self) -> RPolarsDataFrame {
+    pub unsafe fn into_frame(&self) -> RPolarsDataFrame {
         RPolarsDataFrame(pl::DataFrame::new_no_checks(vec![self.0.clone()]))
     }
 }

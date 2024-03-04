@@ -3,17 +3,13 @@ use crate::concurrent::{
 };
 use crate::conversion::strings_to_smartstrings;
 
-use crate::lazy::dsl::RPolarsExpr;
 use crate::lazy::dsl::*;
 
 use crate::rdataframe::RPolarsDataFrame as RDF;
-use crate::rdatatype::{
-    new_asof_strategy, new_ipc_compression, new_parquet_compression, new_unique_keep_strategy,
-    RPolarsDataType,
-};
+use crate::rdatatype::{new_ipc_compression, new_parquet_compression, RPolarsDataType};
 use crate::robj_to;
-use crate::rpolarserr::{polars_to_rpolars_err, RResult, Rctx, WithRctx};
-use crate::utils::{r_result_list, try_f64_into_usize, wrappers::null_to_opt};
+use crate::rpolarserr::{polars_to_rpolars_err, RPolarsErr, RResult, WithRctx};
+use crate::utils::{r_result_list, try_f64_into_usize};
 use extendr_api::prelude::*;
 use pl::{AsOfOptions, Duration, RollingGroupOptions};
 use polars::frame::explode::MeltArgs;
@@ -83,6 +79,7 @@ impl RPolarsLazyFrame {
         })
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn sink_parquet(
         &self,
         path: Robj,
@@ -117,6 +114,7 @@ impl RPolarsLazyFrame {
             .map_err(polars_to_rpolars_err)
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn sink_csv(
         &self,
         path: Robj,
@@ -147,7 +145,7 @@ impl RPolarsLazyFrame {
         let include_header = robj_to!(bool, include_header)?;
         let include_bom = robj_to!(bool, include_bom)?;
         let maintain_order = robj_to!(bool, maintain_order)?;
-        let batch_size = robj_to!(usize, batch_size)?;
+        let batch_size = robj_to!(nonzero_usize, batch_size)?;
 
         let serialize_options = SerializeOptions {
             date_format,
@@ -243,7 +241,7 @@ impl RPolarsLazyFrame {
         let out = ldf
             .quantile(
                 robj_to!(PLExpr, quantile)?,
-                robj_to!(new_quantile_interpolation_option, interpolation)?,
+                robj_to!(quantile_interpolation_option, interpolation)?,
             )
             .map_err(polars_to_rpolars_err)?;
         Ok(out.into())
@@ -266,11 +264,7 @@ impl RPolarsLazyFrame {
     }
 
     fn drop(&self, columns: Robj) -> Result<RPolarsLazyFrame, String> {
-        Ok(self
-            .0
-            .clone()
-            .drop_columns(robj_to!(Vec, String, columns)?)
-            .into())
+        Ok(self.0.clone().drop(robj_to!(Vec, String, columns)?).into())
     }
 
     fn fill_nan(&self, fill_value: Robj) -> Result<Self, String> {
@@ -317,10 +311,6 @@ impl RPolarsLazyFrame {
         Ok(RPolarsLazyFrame(self.clone().0.select(exprs)))
     }
 
-    fn limit(&self, n: Robj) -> Result<Self, String> {
-        Ok(self.0.clone().limit(robj_to!(u32, n)?).into())
-    }
-
     fn tail(&self, n: Robj) -> Result<RPolarsLazyFrame, String> {
         Ok(RPolarsLazyFrame(self.0.clone().tail(robj_to!(u32, n)?)))
     }
@@ -339,13 +329,8 @@ impl RPolarsLazyFrame {
         }
     }
 
-    fn unique(
-        &self,
-        subset: Robj,
-        keep: Robj,
-        maintain_order: Robj,
-    ) -> Result<RPolarsLazyFrame, String> {
-        let ke = new_unique_keep_strategy(robj_to!(str, keep)?)?;
+    fn unique(&self, subset: Robj, keep: Robj, maintain_order: Robj) -> RResult<RPolarsLazyFrame> {
+        let ke = robj_to!(UniqueKeepStrategy, keep)?;
         let maintain_order = robj_to!(bool, maintain_order)?;
         let subset = robj_to!(Option, Vec, String, subset)?;
         let lf = if maintain_order {
@@ -356,8 +341,8 @@ impl RPolarsLazyFrame {
         Ok(lf.into())
     }
 
-    fn group_by(&self, exprs: Robj, maintain_order: Robj) -> Result<RPolarsLazyGroupBy, String> {
-        let expr_vec = robj_to!(VecPLExprCol, exprs)?;
+    fn group_by(&self, exprs: Robj, maintain_order: Robj) -> RResult<RPolarsLazyGroupBy> {
+        let expr_vec = robj_to!(VecPLExprColNamed, exprs)?;
         let maintain_order = robj_to!(Option, bool, maintain_order)?.unwrap_or(false);
         if maintain_order {
             Ok(RPolarsLazyGroupBy {
@@ -372,11 +357,11 @@ impl RPolarsLazyFrame {
         }
     }
 
-    fn with_row_count(&self, name: Robj, offset: Robj) -> RResult<Self> {
+    fn with_row_index(&self, name: Robj, offset: Robj) -> RResult<Self> {
         Ok(self
             .0
             .clone()
-            .with_row_count(
+            .with_row_index(
                 robj_to!(String, name)?.as_str(),
                 robj_to!(Option, u32, offset)?,
             )
@@ -389,24 +374,17 @@ impl RPolarsLazyFrame {
         other: Robj,
         left_on: Robj,
         right_on: Robj,
-        left_by: Nullable<Robj>,
-        right_by: Nullable<Robj>,
+        left_by: Robj,
+        right_by: Robj,
         allow_parallel: Robj,
         force_parallel: Robj,
         suffix: Robj,
         strategy: Robj,
         tolerance: Robj,
         tolerance_str: Robj,
-    ) -> Result<Self, String> {
-        //TODO upgrade robj_to to handle variadic composed types, as
-        // robj_to!(Option, Vec, left_by), instead of this ad-hoc conversion
-        // using Nullable to handle outer Option and robj_to! for inner Vec<String>
-        let left_by = null_to_opt(left_by)
-            .map(|left_by| robj_to!(Vec, String, left_by))
-            .transpose()?;
-        let right_by = null_to_opt(right_by)
-            .map(|right_by| robj_to!(Vec, String, right_by))
-            .transpose()?;
+    ) -> RResult<Self> {
+        let left_by = robj_to!(Option, Vec, String, left_by)?;
+        let right_by = robj_to!(Option, Vec, String, right_by)?;
 
         // polars AnyValue<&str> is not self owned, therefore rust-polars
         // chose to handle tolerance_str isolated as a String. Only one, if any,
@@ -415,8 +393,10 @@ impl RPolarsLazyFrame {
         // like tolerance = pl$lit(42)$cast(pl$UInt64).
 
         let tolerance = robj_to!(Option, Expr, tolerance)?
+            //TODO expr_to_any_value should return RResult
             .map(|e| crate::rdatatype::expr_to_any_value(e.0))
-            .transpose()?;
+            .transpose()
+            .map_err(|err| RPolarsErr::new().plain(err))?;
         let tolerance_str = robj_to!(Option, String, tolerance_str)?;
 
         Ok(self
@@ -429,11 +409,7 @@ impl RPolarsLazyFrame {
             .allow_parallel(robj_to!(bool, allow_parallel)?)
             .force_parallel(robj_to!(bool, force_parallel)?)
             .how(pl::JoinType::AsOf(AsOfOptions {
-                strategy: robj_to!(str, strategy).and_then(|s| {
-                    new_asof_strategy(s)
-                        .map_err(Rctx::Plain)
-                        .bad_arg("stragegy")
-                })?,
+                strategy: robj_to!(AsOfStrategy, strategy)?,
                 left_by: left_by.map(|opt_vec_s| opt_vec_s.into_iter().map(|s| s.into()).collect()),
                 right_by: right_by
                     .map(|opt_vec_s| opt_vec_s.into_iter().map(|s| s.into()).collect()),
@@ -487,6 +463,12 @@ impl RPolarsLazyFrame {
         let mut ddd = robj_to!(VecPLExprCol, dotdotdot)?;
         exprs.append(&mut ddd);
         let descending = robj_to!(Vec, bool, descending)?;
+
+        if descending.is_empty() {
+            return Err(RPolarsErr::new()
+                .plain("`descending` must be of length 1 or of the same length as `by`".into()));
+        };
+
         let nulls_last = robj_to!(bool, nulls_last)?;
         let maintain_order = robj_to!(bool, maintain_order)?;
         Ok(self
@@ -655,6 +637,7 @@ impl RPolarsLazyFrame {
         })
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn group_by_dynamic(
         &self,
         index_column: Robj,

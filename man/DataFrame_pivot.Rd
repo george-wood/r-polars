@@ -8,6 +8,7 @@ DataFrame_pivot(
   values,
   index,
   columns,
+  ...,
   aggregate_function = NULL,
   maintain_order = TRUE,
   sort_columns = FALSE,
@@ -23,6 +24,8 @@ DataFrame_pivot(
 \item{columns}{Name of the column(s) whose values will be used as the header
 of the output DataFrame.}
 
+\item{...}{Not used.}
+
 \item{aggregate_function}{One of:
 \itemize{
 \item string indicating the expressions to aggregate with, such as 'first',
@@ -30,10 +33,8 @@ of the output DataFrame.}
 \item an Expr e.g. \code{pl$element()$sum()}
 }}
 
-\item{maintain_order}{Keep the same order as the original \code{DataFrame}. Setting
-this to \code{TRUE} makes it more expensive to compute and blocks the possibility
-to run on the streaming engine. The default value can be changed with
-\code{options(polars.maintain_order = TRUE)}.}
+\item{maintain_order}{Sort the grouped keys so that the output order is
+predictable.}
 
 \item{sort_columns}{Sort the transposed columns by name. Default is by order
 of discovery.}

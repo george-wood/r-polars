@@ -37,6 +37,10 @@ replace_private_with_pub_methods(RPolarsExpr, "^Expr_")
 expr_list_make_sub_ns = macro_new_subnamespace("^ExprList_", "RPolarsExprListNameSpace")
 
 #' @export
+`$.RPolarsExprArrNameSpace` = sub_name_space_accessor_function
+expr_arr_make_sub_ns = macro_new_subnamespace("^ExprArr_", "RPolarsExprArrNameSpace")
+
+#' @export
 `$.RPolarsExprStrNameSpace` = sub_name_space_accessor_function
 expr_str_make_sub_ns = macro_new_subnamespace("^ExprStr_", "RPolarsExprStrNameSpace")
 
@@ -69,6 +73,9 @@ replace_private_with_pub_methods(RPolarsThen, "^Then_")
 replace_private_with_pub_methods(RPolarsChainedWhen, "^ChainedWhen_")
 replace_private_with_pub_methods(RPolarsChainedThen, "^ChainedThen_")
 
+add_expr_methods_to_then(RPolarsThen)
+add_expr_methods_to_then(RPolarsChainedThen)
+
 # any sub-namespace inherits 'method_environment'
 # This s3 method performs auto-completion
 #' @title auto complete $-access into a polars object
@@ -99,6 +106,9 @@ replace_private_with_pub_methods(RPolarsRField, "^RField_")
 # Series
 replace_private_with_pub_methods(RPolarsSeries, "^Series_")
 
+## Add methods from Expr
+add_expr_methods_to_series()
+
 # RThreadHandle
 replace_private_with_pub_methods(RPolarsRThreadHandle, "^RThreadHandle_")
 
@@ -108,12 +118,18 @@ replace_private_with_pub_methods(RPolarsSQLContext, "^SQLContext_")
 # pl top level functions
 replace_private_with_pub_methods(pl, "^pl_")
 
-# expression constructors, why not just pl$lit = Expr_lit?
-move_env_elements(RPolarsExpr, pl, c("lit"), remove = FALSE)
 
-# tell testthat data.table is suggested
-.datatable.aware = TRUE
-
+# Package startup messages must be in .onAttach(), not in .onLoad() otherwise
+# R CMD check throws a NOTE. See also: https://r-pkgs.org/r-cmd-check.html#r-code
+.onAttach = function(libname, pkgname) {
+  # activate improved code completion in RStudio only
+  if (is_rstudio()) {
+    packageStartupMessage(
+      "Experimental RStudio code completion with polars methods is available.\n",
+      "Activate it with `polars_code_completion_activate()`."
+    )
+  }
+}
 
 .onLoad = function(libname, pkgname) {
   # Auto limit the max number of threads used by polars
@@ -123,7 +139,7 @@ move_env_elements(RPolarsExpr, pl, c("lit"), remove = FALSE)
       Sys.getenv("POLARS_MAX_THREADS") == "") {
     Sys.setenv(POLARS_MAX_THREADS = 2)
     # Call polars to lock the pool size
-    invisible(threadpool_size())
+    invisible(thread_pool_size())
     Sys.unsetenv("POLARS_MAX_THREADS")
   }
 

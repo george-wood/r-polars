@@ -1,34 +1,118 @@
-#' @title Inner workings of the DataFrame-class
+#' Inner workings of the DataFrame-class
 #'
 #' @name DataFrame_class
-#' @description
-#' The `DataFrame`-class is simply two environments of respectively the public
-#' and private methods/function calls to the polars Rust side. The instantiated
-#' `DataFrame`-object is an `externalptr` to a low-level Rust polars DataFrame
-#' object.
+#' @aliases RPolarsDataFrame
+#' @description The `DataFrame`-class is simply two environments of respectively
+#' the public and private methods/function calls to the polars Rust side. The
+#' instantiated `DataFrame`-object is an `externalptr` to a low-level Rust
+#' polars DataFrame object.
 #'
-#' The S3 method `.DollarNames.RPolarsDataFrame` exposes all public `$foobar()`-methods
-#' which are callable onto the object. Most methods return another `DataFrame`-
-#' class instance or similar which allows for method chaining. This class system
-#' could be called "environment classes" (in lack of a better name) and is the
-#' same class system `extendr` provides, except here there are both a public and
-#' private set of methods. For implementation reasons, the private methods are
-#' external and must be called from `.pr$DataFrame$methodname()`. Also, all
-#' private methods must take any `self` as an argument, thus they are pure
-#' functions. Having the private methods as pure functions solved/simplified
-#' self-referential complications.
+#' The S3 method `.DollarNames.RPolarsDataFrame` exposes all public
+#' `$foobar()`-methods which are callable onto the object. Most methods return
+#' another `DataFrame`- class instance or similar which allows for method
+#' chaining. This class system could be called "environment classes" (in lack
+#' of a better name) and is the same class system `extendr` provides, except
+#' here there are both a public and private set of methods. For implementation
+#' reasons, the private methods are external and must be called from
+#' `.pr$DataFrame$methodname()`. Also, all private methods must take any
+#' `self` as an argument, thus they are pure functions. Having the private
+#' methods as pure functions solved/simplified self-referential complications.
 #'
-#' @details
-#' Check out the source code in [R/dataframe_frame.R](https://github.com/pola-rs/r-polars/blob/main/R/dataframe__frame.R)
+#' @section Active bindings:
+#'
+#' ## columns
+#'
+#' `$columns` returns a character vector with the column names.
+#'
+#' ## dtypes
+#'
+#' `$dtypes` returns a unnamed list with the [data type][pl_dtypes] of each column.
+#'
+#' ## flags
+#'
+#' `$flags` returns a nested list with column names at the top level and
+#' column flags in each sublist.
+#'
+#' Flags are used internally to avoid doing unnecessary computations, such as
+#' sorting a variable that we know is already sorted. The number of flags
+#' varies depending on the column type: columns of type `array` and `list`
+#' have the flags `SORTED_ASC`, `SORTED_DESC`, and `FAST_EXPLODE`, while other
+#' column types only have the former two.
+#'
+#' - `SORTED_ASC` is set to `TRUE` when we sort a column in increasing order, so
+#'   that we can use this information later on to avoid re-sorting it.
+#' - `SORTED_DESC` is similar but applies to sort in decreasing order.
+#'
+#' ## height
+#'
+#' `$height` returns the number of rows in the DataFrame.
+#'
+#' ## schema
+#'
+#' `$schema` returns a named list with the [data type][pl_dtypes] of each column.
+#'
+#' ## shape
+#'
+#' `$shape` returns a numeric vector of length two with the number of rows and
+#' the number of columns.
+#'
+#' ## width
+#'
+#' `$width` returns the number of columns in the DataFrame.
+#'
+#' @section Conversion to R data types considerations:
+#' When converting Polars objects, such as [DataFrames][DataFrame_class]
+#' to R objects, for example via the [`as.data.frame()`][as.data.frame.RPolarsDataFrame] generic function,
+#' each type in the Polars object is converted to an R type.
+#' In some cases, an error may occur because the conversion is not appropriate.
+#' In particular, there is a high possibility of an error when converting
+#' a [Datetime][DataType_Datetime] type without a time zone.
+#' A [Datetime][DataType_Datetime] type without a time zone in Polars is converted
+#' to the [POSIXct] type in R, which takes into account the time zone in which
+#' the R session is running (which can be checked with the [Sys.timezone()]
+#' function). In this case, if ambiguous times are included, a conversion error
+#' will occur. In such cases, change the session time zone using
+#' [`Sys.setenv(TZ = "UTC")`][base::Sys.setenv] and then perform the conversion, or use the
+#' [`$dt$replace_time_zone()`][ExprDT_replace_time_zone] method on the Datetime type column to
+#' explicitly specify the time zone before conversion.
+#'
+#' ```{r}
+#' # Due to daylight savings, clocks were turned forward 1 hour on Sunday, March 8, 2020, 2:00:00 am
+#' # so this particular date-time doesn't exist
+#' non_existent_time = pl$Series("2020-03-08 02:00:00")$str$strptime(pl$Datetime(), "%F %T")
+#'
+#' withr::with_envvar(
+#'   new = c(TZ = "America/New_York"),
+#'   {
+#'     tryCatch(
+#'       # This causes an error due to the time zone (the `TZ` env var is affected).
+#'       as.vector(non_existent_time),
+#'       error = function(e) e
+#'     )
+#'   }
+#' )
+#'
+#' withr::with_envvar(
+#'   new = c(TZ = "America/New_York"),
+#'   {
+#'     # This is safe.
+#'     as.vector(non_existent_time$dt$replace_time_zone("UTC"))
+#'   }
+#' )
+#' ```
+#' @details Check out the source code in
+#' [R/dataframe_frame.R](https://github.com/pola-rs/r-polars/blob/main/R/dataframe__frame.R)
 #' to see how public methods are derived from private methods. Check out
 #' [extendr-wrappers.R](https://github.com/pola-rs/r-polars/blob/main/R/extendr-wrappers.R)
 #' to see the `extendr`-auto-generated methods. These are moved to `.pr` and
-#' converted into pure external functions in [after-wrappers.R](https://github.com/pola-rs/r-polars/blob/main/R/after-wrappers.R). In [zzz.R](https://github.com/pola-rs/r-polars/blob/main/R/zzz.R)
-#' (named `zzz` to be last file sourced) the `extendr`-methods are removed and
+#' converted into pure external functions in
+#' [after-wrappers.R](https://github.com/pola-rs/r-polars/blob/main/R/after-wrappers.R).
+#' In [zzz.R](https://github.com/pola-rs/r-polars/blob/main/R/zzz.R) (named
+#' `zzz` to be last file sourced) the `extendr`-methods are removed and
 #' replaced by any function prefixed `DataFrame_`.
 #'
 #' @keywords DataFrame
-#' @return Not applicable
+#'
 #' @examples
 #' # see all public exported method names (normally accessed via a class
 #' # instance with $)
@@ -37,14 +121,11 @@
 #' # see all private methods (not intended for regular use)
 #' ls(.pr$DataFrame)
 #'
-#'
 #' # make an object
-#' df = pl$DataFrame(iris)
+#' df = as_polars_df(iris)
 #'
-#'
-#' # use a public method/property
+#' # call an active binding
 #' df$shape
-#' df2 = df
 #'
 #' # use a private method, which has mutability
 #' result = .pr$DataFrame$set_column_from_robj(df, 150:1, "some_ints")
@@ -52,8 +133,13 @@
 #' # Column exists in both dataframes-objects now, as they are just pointers to
 #' # the same object
 #' # There are no public methods with mutability.
+#' df2 = df
+#'
 #' df$columns
 #' df2$columns
+#'
+#' # Show flags
+#' df$sort("Sepal.Length")$flags
 #'
 #' # set_column_from_robj-method is fallible and returned a result which could
 #' # be "ok" or an error.
@@ -72,6 +158,42 @@
 #' err_result = .pr$DataFrame$set_column_from_robj(df, 1:10000, "wrong_length")
 #' tryCatch(unwrap(err_result, call = NULL), error = \(e) cat(as.character(e)))
 NULL
+
+
+## Active bindings
+
+DataFrame_columns = method_as_active_binding(
+  \() .pr$DataFrame$columns(self),
+  setter = TRUE
+)
+
+
+DataFrame_dtypes = method_as_active_binding(\() .pr$DataFrame$dtypes(self))
+
+
+DataFrame_flags = method_as_active_binding(
+  function() {
+    out = lapply(
+      self$columns,
+      \(x) self[, x]$flags
+    )
+    names(out) = self$columns
+
+    out
+  }
+)
+
+
+DataFrame_height = method_as_active_binding(\() .pr$DataFrame$shape(self)[1L])
+
+
+DataFrame_schema = method_as_active_binding(\() .pr$DataFrame$schema(self))
+
+
+DataFrame_shape = method_as_active_binding(\() .pr$DataFrame$shape(self))
+
+
+DataFrame_width = method_as_active_binding(\() .pr$DataFrame$shape(self)[2L])
 
 
 #' @title auto complete $-access into a polars object
@@ -308,33 +430,21 @@ DataFrame.property_setters = new.env(parent = emptyenv())
 #' df = pl$DataFrame(mtcars)
 #'
 #' # by default, the index starts at 0 (to mimic the behavior of Python Polars)
-#' df$with_row_count("idx")
+#' df$with_row_index("idx")
 #'
 #' # but in R, we use a 1-index
-#' df$with_row_count("idx", offset = 1)
-DataFrame_with_row_count = function(name, offset = NULL) {
-  .pr$DataFrame$with_row_count(self, name, offset) |> unwrap()
+#' df$with_row_index("idx", offset = 1)
+DataFrame_with_row_index = function(name, offset = NULL) {
+  .pr$DataFrame$with_row_index(self, name, offset) |>
+    unwrap("in $with_row_index():")
 }
 
-#' Get and set column names of a DataFrame
-#' @name DataFrame_columns
-#' @rdname DataFrame_columns
-#'
-#' @return A character vector with the column names.
-#' @keywords DataFrame
-#'
-#' @examples
-#' df = pl$DataFrame(iris)
-#'
-#' # get values
-#' df$columns
-#'
-#' # set + get values
-#' df$columns = letters[1:5] # <- is fine too
-#' df$columns
-DataFrame_columns = method_as_property(function() {
-  .pr$DataFrame$columns(self)
-}, setter = TRUE)
+DataFrame_with_row_count = function(name, offset = NULL) {
+  warning("`$with_row_count()` is deprecated and will be removed in 0.15.0. Use `with_row_index()` instead.")
+  .pr$DataFrame$with_row_index(self, name, offset) |>
+    unwrap("in $with_row_count():")
+}
+
 
 # define setter function
 DataFrame.property_setters$columns = function(self, names) {
@@ -386,91 +496,35 @@ DataFrame_drop_nulls = function(subset = NULL) {
 #' * "first": Keep first unique row.
 #' * "last": Keep last unique row.
 #' * "none": Don’t keep duplicate rows.
-#' @param maintain_order Keep the same order as the original `DataFrame`. Setting
+#' @param maintain_order Keep the same order as the original data. Setting
 #'  this to `TRUE` makes it more expensive to compute and blocks the possibility
-#'  to run on the streaming engine. The default value can be changed with
-#' `options(polars.maintain_order = TRUE)`.
+#'  to run on the streaming engine.
 #'
 #' @return DataFrame
 #' @examples
 #' df = pl$DataFrame(
-#'   x = sample(10, 100, rep = TRUE),
-#'   y = sample(10, 100, rep = TRUE)
+#'   x = c(1:3, 1:3, 3:1, 1L),
+#'   y = c(1:3, 1:3, 1:3, 1L)
 #' )
 #' df$height
 #'
 #' df$unique()$height
-#' df$unique(subset = "x")$height
 #'
-#' df$unique(keep = "last")
+#' # subset to define unique, keep only last or first
+#' df$unique(subset = "x", keep = c("last"))
+#' df$unique(subset = "x", keep = c("first"))
 #'
 #' # only keep unique rows
 #' df$unique(keep = "none")
-DataFrame_unique = function(subset = NULL, keep = "first", maintain_order = FALSE) {
-  self$lazy()$unique(subset, keep, maintain_order)$collect()
+DataFrame_unique = function(
+    subset = NULL,
+    keep = c("first", "last", "none"),
+    maintain_order = FALSE) {
+  self$lazy()$unique(subset, keep, maintain_order) |>
+    .pr$LazyFrame$collect() |>
+    unwrap("in $unique():")
 }
 
-
-#' Dimensions of a DataFrame
-#' @name DataFrame_shape
-#' @description Get shape/dimensions of DataFrame
-#'
-#' @return Numeric vector of length two with the number of rows and the number
-#' of columns.
-#' @keywords DataFrame
-#' @examples
-#' pl$DataFrame(iris)$shape
-DataFrame_shape = method_as_property(function() {
-  .pr$DataFrame$shape(self)
-})
-
-
-
-#' Number of rows of a DataFrame
-#' @name DataFrame_height
-#' @description Get the number of rows (height) of a DataFrame
-#'
-#' @return The number of rows of the DataFrame
-#' @aliases height nrow
-#' @keywords DataFrame
-#' @examples
-#' pl$DataFrame(iris)$height
-DataFrame_height = method_as_property(function() {
-  .pr$DataFrame$shape(self)[1L]
-})
-
-
-#' Number of columns of a DataFrame
-#' @name DataFrame_width
-#' @description Get the number of columns (width) of a DataFrame
-#'
-#' @return The number of columns of a DataFrame
-#' @keywords DataFrame
-#' @examples
-#' pl$DataFrame(iris)$width
-DataFrame_width = method_as_property(function() {
-  .pr$DataFrame$shape(self)[2L]
-})
-
-
-#' Data types information
-#' @name DataFrame_dtypes
-#' @description Get the data type of all columns. You can see all available
-#' types with `names(pl$dtypes)`. The data type of each column is also shown
-#' when printing the DataFrame.
-#'
-#' @return
-#' `$dtypes` returns an unnamed list with the data type of each column.
-#' `$schema` returns a named list with the column names and the data type of
-#' each column.
-#' @keywords DataFrame
-#' @examples
-#' pl$DataFrame(iris)$dtypes
-#'
-#' pl$DataFrame(iris)$schema
-DataFrame_dtypes = method_as_property(function() {
-  .pr$DataFrame$dtypes(self)
-})
 
 #' Data types information
 #' @name DataFrame_dtype_strings
@@ -485,12 +539,6 @@ DataFrame_dtypes = method_as_property(function() {
 #' @examples
 #' pl$DataFrame(iris)$dtype_strings()
 DataFrame_dtype_strings = use_extendr_wrapper
-
-#' @rdname DataFrame_dtypes
-
-DataFrame_schema = method_as_property(function() {
-  .pr$DataFrame$schema(self)
-})
 
 
 #' Convert an existing DataFrame to a LazyFrame
@@ -507,23 +555,37 @@ DataFrame_schema = method_as_property(function() {
 DataFrame_lazy = use_extendr_wrapper
 
 #' Clone a DataFrame
-#' @name DataFrame_clone
-#' @description This is rarely useful as a DataFrame is nearly 100% immutable.
-#' Any modification of a DataFrame would lead to a clone anyway.
+#'
+#' This makes a very cheap deep copy/clone of an existing
+#' [`DataFrame`][DataFrame_class]. Rarely useful as `DataFrame`s are nearly 100%
+#' immutable. Any modification of a `DataFrame` should lead to a clone anyways,
+#' but this can be useful when dealing with attributes (see examples).
 #'
 #' @return A DataFrame
-#' @aliases DataFrame_clone
-#' @keywords  DataFrame
 #' @examples
 #' df1 = pl$DataFrame(iris)
-#' df2 = df1$clone()
-#' df3 = df1
 #'
-#' # the clone and the original don't have the same address...
-#' pl$mem_address(df1) != pl$mem_address(df2)
+#' # Make a function to take a DataFrame, add an attribute, and return a DataFrame
+#' give_attr = function(data) {
+#'   attr(data, "created_on") = "2024-01-29"
+#'   data
+#' }
+#' df2 = give_attr(df1)
 #'
-#' # ... but simply assigning df1 to df3 change the address anyway
-#' pl$mem_address(df1) == pl$mem_address(df3)
+#' # Problem: the original DataFrame also gets the attribute while it shouldn't!
+#' attributes(df1)
+#'
+#' # Use $clone() inside the function to avoid that
+#' give_attr = function(data) {
+#'   data = data$clone()
+#'   attr(data, "created_on") = "2024-01-29"
+#'   data
+#' }
+#' df1 = pl$DataFrame(iris)
+#' df2 = give_attr(df1)
+#'
+#' # now, the original DataFrame doesn't get this attribute
+#' attributes(df1)
 DataFrame_clone = function() {
   .pr$DataFrame$clone_in_rust(self)
 }
@@ -589,8 +651,8 @@ DataFrame_to_series = function(idx = 0) {
 }
 
 #' Sort a DataFrame
-#' @inheritParams DataFrame_unique
 #' @inherit LazyFrame_sort details description params
+#' @inheritParams DataFrame_unique
 #' @return DataFrame
 #' @keywords  DataFrame
 #' @examples
@@ -747,44 +809,39 @@ DataFrame_with_columns = function(...) {
 }
 
 
-
-#' Limit a DataFrame
-#' @name DataFrame_limit
-#' @description Take some maximum number of rows.
-#' @param n Positive number not larger than 2^32.
-#'
-#' @details Any number will converted to u32. Negative raises error.
-#' @keywords  DataFrame
-#' @return DataFrame
+#' @inherit LazyFrame_head title details
+#' @param n Number of rows to return. If a negative value is passed,
+#' return all rows except the last [`abs(n)`][abs].
+#' @return A [DataFrame][DataFrame_class]
 #' @examples
-#' pl$DataFrame(iris)$limit(6)
-DataFrame_limit = function(n) {
-  self$lazy()$limit(n)$collect()
-}
-
-#' Head of a DataFrame
-#' @name DataFrame_head
-#' @description Get the first `n` rows of the query.
-#' @param n Positive number not larger than 2^32.
+#' df = pl$DataFrame(foo = 1:5, bar = 6:10, ham = letters[1:5])
 #'
-#' @inherit DataFrame_limit details
-#' @keywords  DataFrame
-#' @return DataFrame
-
-DataFrame_head = function(n) {
+#' df$head(3)
+#'
+#' # Pass a negative value to get all rows except the last `abs(n)`.
+#' df$head(-3)
+DataFrame_head = function(n = 5L) {
+  if (isTRUE(n < 0)) n = max(0, self$height + n)
   self$lazy()$head(n)$collect()
 }
 
-#' Tail of a DataFrame
-#' @name DataFrame_tail
-#' @description Get the last `n` rows.
-#' @param n Positive number not larger than 2^32.
-#'
-#' @inherit DataFrame_limit details
-#' @keywords  DataFrame
-#' @return DataFrame
+#' @rdname DataFrame_head
+DataFrame_limit = DataFrame_head
 
-DataFrame_tail = function(n) {
+
+#' @inherit LazyFrame_tail title
+#' @param n Number of rows to return. If a negative value is passed,
+#' return all rows except the first [`abs(n)`][abs].
+#' @inherit DataFrame_head return
+#' @examples
+#' df = pl$DataFrame(foo = 1:5, bar = 6:10, ham = letters[1:5])
+#'
+#' df$tail(3)
+#'
+#' # Pass a negative value to get all rows except the first `abs(n)`.
+#' df$tail(-3)
+DataFrame_tail = function(n = 5L) {
+  if (isTRUE(n < 0)) n = max(0, self$height + n)
   self$lazy()$tail(n)$collect()
 }
 
@@ -816,27 +873,41 @@ DataFrame_filter = function(...) {
 }
 
 #' Group a DataFrame
-#' @inheritParams DataFrame_unique
+#' @inheritParams LazyFrame_group_by
 #' @inherit LazyFrame_group_by description params
-#' @keywords DataFrame
-#' @return GroupBy (a DataFrame with special groupby methods like `$agg()`)
+#' @details Within each group, the order of the rows is always preserved,
+#' regardless of the `maintain_order` argument.
+#' @return [GroupBy][GroupBy_class] (a DataFrame with special groupby methods like `$agg()`)
 #' @examples
-#' gb = pl$DataFrame(
-#'   foo = c("one", "two", "two", "one", "two"),
-#'   bar = c(5, 3, 2, 4, 1)
-#' )$group_by("foo", maintain_order = TRUE)
+#' df = pl$DataFrame(
+#'   a = c("a", "b", "a", "b", "c"),
+#'   b = c(1, 2, 1, 3, 3),
+#'   c = c(5, 4, 3, 2, 1)
+#' )
 #'
-#' gb
+#' df$group_by("a")$agg(pl$col("b")$sum())
 #'
-#' gb$agg(
-#'   pl$col("bar")$sum()$name$suffix("_sum"),
-#'   pl$col("bar")$mean()$alias("bar_tail_sum")
+#' # Set `maintain_order = TRUE` to ensure the order of the groups is consistent with the input.
+#' df$group_by("a", maintain_order = TRUE)$agg(pl$col("c"))
+#'
+#' # Group by multiple columns by passing a list of column names.
+#' df$group_by(c("a", "b"))$agg(pl$max("c"))
+#'
+#' # Or pass some arguments to group by multiple columns in the same way.
+#' # Expressions are also accepted.
+#' df$group_by("a", pl$col("b") %/% 2)$agg(
+#'   pl$col("c")$mean()
+#' )
+#'
+#' # The columns will be renamed to the argument names.
+#' df$group_by(d = "a", e = pl$col("b") %/% 2)$agg(
+#'   pl$col("c")$mean()
 #' )
 DataFrame_group_by = function(..., maintain_order = polars_options()$maintain_order) {
   # clone the DataFrame, bundle args as attributes. Non fallible.
   construct_group_by(
     self,
-    groupby_input = unpack_list(..., .context = "$group_by()"),
+    groupby_input = unpack_list(..., .context = "$group_by():"),
     maintain_order = maintain_order
   )
 }
@@ -854,6 +925,7 @@ DataFrame_group_by = function(..., maintain_order = polars_options()$maintain_or
 #' * `"string"` converts Int64 values to character.
 #'
 #' @return An R data.frame
+#' @inheritSection DataFrame_class Conversion to R data types considerations
 #' @keywords DataFrame
 #' @examples
 #' df = pl$DataFrame(iris[1:3, ])
@@ -886,6 +958,7 @@ DataFrame_to_data_frame = function(..., int64_conversion = polars_options()$int6
 #' structure is not very typical or efficient in R.
 #'
 #' @return R list of vectors
+#' @inheritSection DataFrame_class Conversion to R data types considerations
 #' @keywords DataFrame
 #' @examples
 #' pl$DataFrame(iris)$to_list()
@@ -1309,7 +1382,7 @@ DataFrame_join_asof = function(
     by_left = NULL,
     by_right = NULL,
     by = NULL,
-    strategy = "backward",
+    strategy = c("backward", "forward", "nearest"),
     suffix = "_right",
     tolerance = NULL,
     allow_parallel = TRUE,
@@ -1373,11 +1446,13 @@ DataFrame_melt = function(
 #' @param index  One or multiple keys to group by.
 #' @param columns  Name of the column(s) whose values will be used as the header
 #' of the output DataFrame.
+#' @param ... Not used.
 #' @param aggregate_function One of:
-#'   - string indicating the expressions to aggregate with, such as 'first',
-#'     'sum', 'max', 'min', 'mean', 'median', 'last', 'count'),
-#'   - an Expr e.g. `pl$element()$sum()`
-#' @inheritParams DataFrame_unique
+#' - string indicating the expressions to aggregate with, such as 'first',
+#'   'sum', 'max', 'min', 'mean', 'median', 'last', 'count'),
+#' - an Expr e.g. `pl$element()$sum()`
+#' @param maintain_order Sort the grouped keys so that the output order is
+#' predictable.
 #' @param sort_columns Sort the transposed columns by name. Default is by order
 #' of discovery.
 #' @param separator Used as separator/delimiter in generated column names.
@@ -1414,6 +1489,7 @@ DataFrame_pivot = function(
     values,
     index,
     columns,
+    ...,
     aggregate_function = NULL,
     maintain_order = TRUE,
     sort_columns = FALSE,
@@ -1434,7 +1510,7 @@ DataFrame_pivot = function(
     )) |>
     # run pivot when valid aggregate_expr
     and_then(\(aggregate_expr) .pr$DataFrame$pivot_expr(
-      self, values, index, columns, maintain_order, sort_columns, aggregate_expr, separator
+      self, index, columns, values, maintain_order, sort_columns, aggregate_expr, separator
     )) |>
     # unwrap and add method context name
     unwrap("in $pivot():")
@@ -1548,32 +1624,12 @@ DataFrame_describe = function(percentiles = c(.25, .75), interpolation = "neares
       expr$alias(paste0("std", custom_sep, x))
     })
 
-    # accept all types but categorical
-    # TODO: add "Enum" to the list of non-accepted types when implemented
-    minmax_cols = lapply(self$schema, \(x) {
-      if (x != pl$Categorical) {
-        x
-      }
-    }) |>
-      unlist() |>
-      names()
-
     min_exprs = lapply(self$columns, function(x) {
-      expr = if (x %in% minmax_cols) {
-        pl$col(x)$min()
-      } else {
-        pl$lit(NA)
-      }
-      expr$alias(paste0("min", custom_sep, x))
+      pl$col(x)$min()$alias(paste0("min", custom_sep, x))
     })
 
     max_exprs = lapply(self$columns, function(x) {
-      expr = if (x %in% minmax_cols) {
-        pl$col(x)$max()
-      } else {
-        pl$lit(NA)
-      }
-      expr$alias(paste0("max", custom_sep, x))
+      pl$col(x)$max()$alias(paste0("max", custom_sep, x))
     })
 
     # Calculate metrics in parallel
@@ -1597,13 +1653,13 @@ DataFrame_describe = function(percentiles = c(.25, .75), interpolation = "neares
       transpose(include_header = TRUE)$
       with_columns(
       pl$col("column")$str$split_exact(custom_sep, 1)$
-        struct$rename_fields(c("describe", "variable"))$
+        struct$rename_fields(c("statistic", "variable"))$
         alias("fields")
     )$
       unnest("fields")$
       drop("column")$
-      pivot(index = "describe", columns = "variable", values = "column_0")$
-      with_columns(describe = pl$lit(metrics))
+      pivot(index = "statistic", columns = "variable", values = "column_0")$
+      with_columns(statistic = pl$lit(metrics))
   }) |>
     uw()
 }
@@ -1680,7 +1736,7 @@ DataFrame_glimpse = function(..., return_as_string = FALSE) {
 #' @return DataFrame
 #' @examples
 #' df = pl$DataFrame(
-#'   letters = c("aa", "aa", "bb", "cc"),
+#'   letters = letters[1:4],
 #'   numbers = list(1, c(2, 3), c(4, 5), c(6, 7, 8)),
 #'   numbers_2 = list(0, c(1, 2), c(3, 4), c(5, 6, 7)) # same structure as numbers
 #' )
@@ -1688,9 +1744,6 @@ DataFrame_glimpse = function(..., return_as_string = FALSE) {
 #'
 #' # explode a single column, append others
 #' df$explode("numbers")
-#'
-#' # it is also possible to explode a character column to have one letter per row
-#' df$explode("letters")
 #'
 #' # explode two columns of same nesting structure, by names or the common dtype
 #' # "List(Float64)"
@@ -1839,6 +1892,36 @@ DataFrame_write_csv = function(
     invisible()
 }
 
+#' Write to parquet file
+#' @inheritParams LazyFrame_sink_parquet
+#'
+#' @rdname IO_write_parquet
+#'
+#' @examples
+#' # write table 'mtcars' from mem to parquet
+#' dat = pl$DataFrame(mtcars)
+#'
+#' destination = tempfile(fileext = ".parquet")
+#' dat$write_parquet(destination)
+DataFrame_write_parquet = function(
+    path,
+    compression = "zstd",
+    compression_level = 3,
+    statistics = FALSE,
+    row_group_size = NULL,
+    data_pagesize_limit = NULL) {
+  .pr$DataFrame$write_parquet(
+    self,
+    path,
+    compression,
+    compression_level,
+    statistics,
+    row_group_size,
+    data_pagesize_limit
+  ) |>
+    unwrap("in $write_parquet():") |>
+    invisible()
+}
 
 #' Write to JSON file
 #'
@@ -1895,7 +1978,7 @@ DataFrame_write_ndjson = function(file) {
 }
 
 #' @inherit LazyFrame_rolling title description params details
-#' @return A [GroupBy][GroupBy_class] object
+#' @return A [RollingGroupBy][RollingGroupBy_class] object
 #'
 #' @examples
 #' df = pl$DataFrame(
@@ -1926,8 +2009,7 @@ DataFrame_rolling = function(index_column, period, offset = NULL, closed = "righ
 #'   time = pl$date_range(
 #'     start = strptime("2021-12-16 00:00:00", format = "%Y-%m-%d %H:%M:%S", tz = "UTC"),
 #'     end = strptime("2021-12-16 03:00:00", format = "%Y-%m-%d %H:%M:%S", tz = "UTC"),
-#'     interval = "30m",
-#'     eager = TRUE,
+#'     interval = "30m"
 #'   ),
 #'   n = 0:6
 #' )

@@ -4,6 +4,8 @@ test_that("lazy prints", {
   df = pl$DataFrame(list(a = 1:3, b = c(T, T, F)))
   ldf = df$lazy()$filter(pl$col("a") == 2L)
 
+  expect_snapshot(print(ldf))
+
   # generic and internal 'print'-methods return self (invisibly likely)
   print_generic = capture_output_lines({
     ret_val = print(ldf)
@@ -13,7 +15,6 @@ test_that("lazy prints", {
     ret_val2 = ldf$print()
   })
   expect_equal(getprint(ret_val2), getprint(ldf))
-
 
   # described plan is not equal to optimized plan
   expect_true(
@@ -417,6 +418,16 @@ test_that("sort", {
   b = df$sort("mpg", nulls_last = FALSE, maintain_order = TRUE)$collect()$to_data_frame()
   expect_true(is.na(a$mpg[32]))
   expect_true(is.na(b$mpg[1]))
+
+  # error if descending is NULL
+  expect_error(
+    df$sort("mpg", descending = NULL),
+    "must be of length 1 or of the same length as `by`"
+  )
+  expect_error(
+    df$sort(c("mpg", "drat"), descending = NULL),
+    "must be of length 1 or of the same length as `by`"
+  )
 })
 
 
@@ -523,73 +534,11 @@ test_that("join_asof_simple", {
 
   # test if setting was as expected in LogicalPlan
   expect_identical(get_reg(logical_json_plan_TT, allow_p_pat), "\"allow_parallel\": Bool(true)")
-  # contribute polars: enable back test when merged https://github.com/pola-rs/polars/pull/8617
-  # expect_identical(get_reg(logical_json_plan_TT,force_p_pat),"\"force_parallel\": Bool(true)")
+  expect_identical(get_reg(logical_json_plan_TT,force_p_pat),"\"force_parallel\": Bool(true)")
   expect_identical(get_reg(logical_json_plan_FF, allow_p_pat), "\"allow_parallel\": Bool(false)")
   expect_identical(get_reg(logical_json_plan_FF, force_p_pat), "\"force_parallel\": Bool(false)")
 })
 
-test_that("melt example", {
-  lf = pl$DataFrame(
-    a = c("x", "y", "z"),
-    b = c(1, 3, 5),
-    c = c(2, 4, 6)
-  )$lazy()
-
-  expect_identical(
-    lf$melt(id_vars = "a", value_vars = c("b", "c"))$collect()$to_list(),
-    list(
-      a = c("x", "y", "z", "x", "y", "z"),
-      variable = c("b", "b", "b", "c", "c", "c"),
-      value = c(1, 3, 5, 2, 4, 6)
-    )
-  )
-})
-
-test_that("melt vs data.table::melt", {
-  skip_if_not_installed("data.table")
-  plf = pl$DataFrame(
-    a = c("x", "y", "z"),
-    b = c(1, 3, 5),
-    c = c(2, 4, 6)
-  )$lazy()
-
-  rdf = plf$collect()$to_data_frame()
-  dtt = data.table::data.table(rdf)
-
-  melt_mod = \(...) {
-    data.table::melt(variable.factor = FALSE, value.factor = FALSE, ...)
-  }
-
-  expect_identical(
-    plf$melt(id_vars = "a", value_vars = c("b", "c"))$collect()$to_list(),
-    as.list(melt_mod(dtt, id.vars = "a", value_vars = c("b", "c")))
-  )
-  expect_identical(
-    plf$melt(id_vars = c("c", "b"), value_vars = c("a"))$collect()$to_list(),
-    as.list(melt_mod(dtt, id.vars = c("c", "b"), value_vars = c("a")))
-  )
-  expect_identical(
-    plf$melt(id_vars = c("a", "b"), value_vars = c("c"))$collect()$to_list(),
-    as.list(melt_mod(dtt, id.vars = c("a", "b"), value_vars = c("b", "c")))
-  )
-
-  expect_identical(
-    plf$melt(
-      id_vars = c("a", "b"), value_vars = c("c"), value_name = "alice", variable_name = "bob"
-    )$collect()$to_list(),
-    as.list(melt_mod(
-      dtt,
-      id.vars = c("a", "b"), value_vars = c("b", "c"), value.name = "alice", variable.name = "bob"
-    ))
-  )
-
-  # check the check, this should not be equal
-  expect_error(expect_equal(
-    plf$melt(id_vars = c("c", "b"), value_vars = c("a"))$collect()$to_list(),
-    as.list(melt_mod(dtt, id.vars = c("a", "b"), value_vars = c("c")))
-  ))
-})
 
 test_that("rename", {
   lf = pl$DataFrame(mtcars)$lazy()
@@ -702,19 +651,6 @@ test_that("explode", {
       numbers2 = c(1, NA, 4:8)
     )
   )
-
-  # explode character columns
-  df = pl$LazyFrame(
-    letters = c("aa", "bbb", "cccc"),
-    numbers = c(1, 2, 3)
-  )
-  expect_equal(
-    df$explode("letters")$collect()$to_data_frame(),
-    data.frame(
-      letters = c(rep("a", 2), rep("b", 3), rep("c", 4)),
-      numbers = c(rep(1, 2), rep(2, 3), rep(3, 4))
-    )
-  )
 })
 
 test_that("width", {
@@ -723,9 +659,9 @@ test_that("width", {
   expect_equal(ncol(dat), 11)
 })
 
-test_that("with_row_count", {
+test_that("with_row_index", {
   lf = pl$LazyFrame(mtcars)
-  expect_identical(lf$with_row_count("idx", 42)$select(pl$col("idx"))$collect()$to_data_frame()$idx, as.double(42:(41 + nrow(mtcars))))
+  expect_identical(lf$with_row_index("idx", 42)$select(pl$col("idx"))$collect()$to_data_frame()$idx, as.double(42:(41 + nrow(mtcars))))
 })
 
 test_that("cloning", {
@@ -737,6 +673,25 @@ test_that("cloning", {
   expect_different(pl$mem_address(pf), pl$mem_address(pf2))
 })
 
+test_that("cloning to avoid giving attributes to original data", {
+  df1 = pl$LazyFrame(iris)
+
+  give_attr = function(data) {
+    attr(data, "created_on") = "2024-01-29"
+    data
+  }
+  df2 = give_attr(df1)
+  expect_identical(attributes(df1)$created_on, "2024-01-29")
+
+  give_attr2 = function(data) {
+    data = data$clone()
+    attr(data, "created_on") = "2024-01-29"
+    data
+  }
+  df1 = pl$LazyFrame(iris)
+  df2 = give_attr2(df1)
+  expect_null(attributes(df1)$created_on)
+})
 
 
 test_that("fetch", {

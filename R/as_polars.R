@@ -1,9 +1,7 @@
 #' To polars DataFrame
 #'
 #' [as_polars_df()] is a generic function that converts an R object to a
-#' polars DataFrame. It is basically a wrapper for [pl$DataFrame()][pl_DataFrame],
-#' but has special implementations for Apache Arrow-based objects such as
-#' polars [LazyFrame][LazyFrame_class] and [arrow::Table].
+#' [polars DataFrame][DataFrame_class].
 #'
 #' For [LazyFrame][LazyFrame_class] objects, this function is a shortcut for
 #' [$collect()][LazyFrame_collect] or [$fetch()][LazyFrame_fetch], depending on
@@ -67,17 +65,35 @@ as_polars_df.default = function(x, ...) {
 #' @param make_names_unique A logical flag to replace duplicated column names
 #' with unique names. If `FALSE` and there are duplicated column names, an
 #' error is thrown.
+#' @inheritParams as_polars_df.ArrowTabular
 #' @export
-as_polars_df.data.frame = function(x, ..., rownames = NULL, make_names_unique = TRUE) {
-  if ((anyDuplicated(names(x)) > 0) && make_names_unique) {
-    names(x) = make.unique(names(x), sep = "_")
+as_polars_df.data.frame = function(
+    x,
+    ...,
+    rownames = NULL,
+    make_names_unique = TRUE,
+    schema = NULL,
+    schema_overrides = NULL) {
+  uw = \(res) unwrap(res, "in as_polars_df():")
+
+  if (anyDuplicated(names(x)) > 0) {
+    col_names_orig = names(x)
+    if (make_names_unique) {
+      names(x) = make.unique(col_names_orig, sep = "_")
+    } else {
+      Err_plain(
+        paste(
+          "conflicting column names not allowed:",
+          paste(unique(col_names_orig[duplicated(col_names_orig)]), collapse = ", ")
+        )
+      ) |>
+        uw()
+    }
   }
 
   if (is.null(rownames)) {
-    pl$DataFrame(x, make_names_unique = FALSE)
+    df_to_rpldf(x, schema = schema, schema_overrides = schema_overrides)
   } else {
-    uw = \(res) unwrap(res, "in as_polars_df():")
-
     if (length(rownames) != 1L || !is.character(rownames) || is.na(rownames)) {
       Err_plain("`rownames` must be a single string, or `NULL`") |>
         uw()
@@ -102,7 +118,7 @@ as_polars_df.data.frame = function(x, ..., rownames = NULL, make_names_unique = 
 
     pl$concat(
       pl$Series(old_rownames, name = rownames),
-      pl$DataFrame(x, make_names_unique = FALSE),
+      df_to_rpldf(x, schema = schema, schema_overrides = schema_overrides),
       how = "horizontal"
     )
   }
@@ -133,7 +149,7 @@ as_polars_df.RPolarsDynamicGroupBy = as_polars_df.RPolarsGroupBy
 #' @rdname as_polars_df
 #' @export
 as_polars_df.RPolarsSeries = function(x, ...) {
-  pl$DataFrame(x)
+  pl$select(x)
 }
 
 
@@ -197,7 +213,7 @@ as_polars_df.ArrowTabular = function(
     rechunk = TRUE,
     schema = NULL,
     schema_overrides = NULL) {
-  arrow_to_rdf(
+  arrow_to_rpldf(
     x,
     rechunk = rechunk,
     schema = schema,
@@ -206,7 +222,43 @@ as_polars_df.ArrowTabular = function(
 }
 
 
-# TODO: as_polars_df.nanoarrow_array_stream
+#' @rdname as_polars_df
+#' @export
+as_polars_df.nanoarrow_array_stream = function(x, ...) {
+  on.exit(x$release())
+
+  if (!inherits(nanoarrow::infer_nanoarrow_ptype(x$get_schema()), "data.frame")) {
+    stop("Can't convert non-struct array stream to RPolarsDataFrame")
+  }
+
+  list_of_struct_arrays = nanoarrow::collect_array_stream(x, validate = FALSE)
+  if (length(list_of_struct_arrays)) {
+    data_cols = list()
+
+    struct_array = list_of_struct_arrays[[1L]]
+    list_of_arrays = struct_array$children
+    col_names = names(list_of_arrays)
+
+    for (i in seq_along(list_of_arrays)) {
+      data_cols[[col_names[i]]] = as_polars_series.nanoarrow_array(list_of_arrays[[i]])
+    }
+
+    for (struct_array in list_of_struct_arrays[-1L]) {
+      list_of_arrays = struct_array$children
+      col_names = names(list_of_arrays)
+      for (i in seq_along(list_of_arrays)) {
+        .pr$Series$append_mut(data_cols[[col_names[i]]], as_polars_series.nanoarrow_array(list_of_arrays[[i]])) |>
+          unwrap("in as_polars_df(<nanoarrow_array_stream>):")
+      }
+    }
+
+    out = do.call(pl$select, data_cols)
+  } else {
+    out = pl$DataFrame() # TODO: support creating 0-row DataFrame
+  }
+
+  out
+}
 
 
 #' To polars LazyFrame
@@ -294,6 +346,16 @@ as_polars_series.RPolarsExpr = function(x, name = NULL, ...) {
 
 #' @rdname as_polars_series
 #' @export
+as_polars_series.RPolarsThen = as_polars_series.RPolarsExpr
+
+
+#' @rdname as_polars_series
+#' @export
+as_polars_series.RPolarsChainedThen = as_polars_series.RPolarsExpr
+
+
+#' @rdname as_polars_series
+#' @export
 as_polars_series.POSIXlt = function(x, name = NULL, ...) {
   as_polars_series(as.POSIXct(x), name = name)
 }
@@ -319,6 +381,136 @@ as_polars_series.Array = function(x, name = NULL, ..., rechunk = TRUE) {
     unwrap()
 }
 
+
 #' @rdname as_polars_series
 #' @export
 as_polars_series.ChunkedArray = as_polars_series.Array
+
+
+#' @rdname as_polars_series
+#' @export
+as_polars_series.nanoarrow_array = function(x, name = NULL, ...) {
+  # TODO: support 0-length array
+  .pr$Series$from_arrow_array_robj(name %||% "", x) |>
+    unwrap()
+}
+
+
+#' @rdname as_polars_series
+#' @export
+as_polars_series.nanoarrow_array_stream = function(x, name = NULL, ...) {
+  on.exit(x$release())
+
+  list_of_arrays = nanoarrow::collect_array_stream(x, validate = FALSE)
+
+  if (length(list_of_arrays) < 1L) {
+    # TODO: support 0-length array stream
+    out = pl$Series(NULL, name = name)
+  } else {
+    out = as_polars_series.nanoarrow_array(list_of_arrays[[1L]], name = name)
+    for (array in list_of_arrays[-1L]) {
+      .pr$Series$append_mut(out, as_polars_series.nanoarrow_array(array))
+    }
+  }
+
+  out
+}
+
+
+#' @rdname as_polars_series
+#' @export
+as_polars_series.clock_time_point = function(x, name = NULL, ...) {
+  from_precision = clock::time_point_precision(x)
+
+  # Polars' datetime type only include ns, us, ms
+  if (
+    !from_precision %in% c(
+      "nanosecond", "microsecond", "millisecond", "second", "minute", "hour", "day"
+    )
+  ) {
+    x = clock::time_point_cast(x, "millisecond")
+    from_precision = clock::time_point_precision(x)
+  }
+
+  # https://github.com/r-lib/clock/blob/adc01b61670b18463cc3087f1e58acf59ddc3915/R/precision.R#L37-L51
+  target_precision = pcase(
+    from_precision == "nanosecond", "ns",
+    from_precision == "microsecond", "us",
+    from_precision == "millisecond", "ms",
+    or_else = "ms" # second, minute, hour, day
+  )
+
+  n_multiply_to_ms = pcase(
+    from_precision == "second", 1000L,
+    from_precision == "minute", 1000L * 60L,
+    from_precision == "hour", 1000L * 60L * 60L,
+    from_precision == "day", 1000L * 60L * 60L * 24L,
+    or_else = 1L # ns, us, ms
+  )
+
+  unclassed_x = unclass(x)
+  df_in = pl$DataFrame(unclassed_x)
+
+  pl_lit_half_of_u64 = pl$lit(2L)$cast(pl$UInt64)$pow(pl$lit(63L)$cast(pl$UInt8))
+
+  # https://github.com/r-lib/clock/blob/adc01b61670b18463cc3087f1e58acf59ddc3915/src/duration.h#L174-L184
+  df_in$select(
+    pl$col("lower")$cast(pl$UInt64),
+    pl$col("upper")$cast(pl$UInt64)
+  )$select(
+    pl$col("lower")$mul(pl$lit(4294967296)$cast(pl$UInt64))$or(
+      pl$col("upper")
+    )
+  )$with_columns(
+    diff_1 = pl$when(
+      pl$col("lower")$gt(pl_lit_half_of_u64)
+    )$then(
+      pl$col("lower")$sub(pl_lit_half_of_u64)
+    )$otherwise(NULL)
+  )$with_columns(
+    diff_2 = pl$when(
+      pl$col("diff_1")$is_null()
+    )$then(pl_lit_half_of_u64$sub(pl$col("lower")))$otherwise(NULL)
+  )$select(
+    out = pl$when(pl$col("diff_1")$is_null())$then(
+      pl$lit(0L)$cast(pl$Int64)$sub(pl$col("diff_2")$cast(pl$Int64))
+    )$otherwise(
+      pl$col("diff_1")$cast(pl$Int64)
+    )$mul(
+      pl$lit(n_multiply_to_ms)$cast(pl$UInt32)
+    )$cast(pl$Datetime(target_precision))
+  )$get_column("out")$alias(name %||% "")
+}
+
+
+#' @rdname as_polars_series
+#' @export
+as_polars_series.clock_sys_time = function(x, name = NULL, ...) {
+  as_polars_series.clock_time_point(x, name = name, ...)$dt$replace_time_zone("UTC")
+}
+
+
+#' @rdname as_polars_series
+#' @export
+as_polars_series.clock_zoned_time = function(x, name = NULL, ...) {
+  tz = clock::zoned_time_zone(x)
+
+  if (isTRUE(tz == "")) {
+    # https://github.com/r-lib/clock/issues/366
+    tz = Sys.timezone()
+  }
+  if (!isTRUE(tz %in% base::OlsonNames())) {
+    sprintf(
+      "The time zone '%s' is not supported in polars. See `base::OlsonNames()` for supported time zones.",
+      tz
+    ) |>
+      Err_plain() |>
+      unwrap("in as_polars_series(<clock_zoned_time>):")
+  }
+
+  as_polars_series.clock_time_point(
+    clock::as_naive_time(x),
+    name = name,
+    ...
+  )$dt$replace_time_zone(tz)
+}

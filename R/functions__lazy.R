@@ -1,18 +1,55 @@
+# TODO: rewrite with generic function `as_polars_lit`
+#' Create a literal value
+#'
+#' @param x A vector of any length
+#'
+#' @return Expr
+#'
+#' @details
+#' `pl$lit(NULL)` translates into a polars `null`.
+#'
+#' @examples
+#' # scalars to literal, explicit `pl$lit(42)` implicit `+ 2`
+#' pl$col("some_column") / pl$lit(42) + 2
+#'
+#' # vector to literal explicitly via Series and back again
+#' # R vector to expression and back again
+#' pl$select(pl$lit(pl$Series(1:4)))$to_list()[[1L]]
+#'
+#' # r vector to literal and back r vector
+#' pl$lit(1:4)$to_r()
+#'
+#' # r vector to literal to dataframe
+#' pl$select(pl$lit(1:4))
+#'
+#' # r vector to literal to Series
+#' pl$lit(1:4)$to_series()
+#'
+#' # vectors to literal implicitly
+#' (pl$lit(2) + 1:4) / 4:1
+pl_lit = function(x) {
+  .pr$Expr$lit(x) |>
+    unwrap("in pl$lit():")
+}
+
+
 #' New Expr referring to all columns
-#' @description
-#' Not to mix up with `Expr_object$all()` which is a 'reduce Boolean columns by AND' method.
+#'
+#' Not to mix up with `Expr_object$all()` which is a 'reduce Boolean columns by
+#' AND' method.
+#'
 #' @param name Character vector indicating on which columns the AND operation
 #' should be applied.
-#' @keywords Expr_new
 #'
 #' @return Boolean literal
 #'
-#' @details  last `all()` in example is this Expr method, the first `pl$all()` refers
-#' to "all-columns" and is an expression constructor
-#'
 #' @examples
-#' pl$DataFrame(all = c(TRUE, TRUE), some = c(TRUE, FALSE))$
-#'   select(pl$all()$all())
+#' test = pl$DataFrame(col_1 = c(TRUE, TRUE), col_2 = c(TRUE, FALSE))
+#' test
+#'
+#' # here, the first `$all()` selects all columns, and the second `$all()` checks
+#' # whether all values are true in each column
+#' test$with_columns(pl$all()$all())
 pl_all = function(name = NULL) {
   if (is.null(name)) {
     return(.pr$Expr$col("*"))
@@ -23,6 +60,7 @@ pl_all = function(name = NULL) {
   # https://github.com/pola-rs/polars/blob/589f36432de6e95e81d9715a77d6fe78360512e5/py-polars/polars/internals/lazy_functions.py#L1095
 }
 
+# TODO: rewrite to simplify
 #' Start Expression with a column
 #' @description
 #' Return an expression representing a column in a DataFrame.
@@ -68,6 +106,10 @@ pl_all = function(name = NULL) {
 #' # from Series of names
 #' df$select(pl$col(pl$Series(c("bar", "foobar"))))
 pl_col = function(name = "", ...) {
+  if (!nargs()) {
+    Err_plain("pl$col() requires at least one argument.") |>
+      unwrap("in pl$col():")
+  }
   robj_to_col(name, list2(...)) |>
     unwrap("in pl$col()")
 }
@@ -81,38 +123,49 @@ pl_col = function(name = "", ...) {
 #' pl$lit(1:5)$cumulative_eval(pl$element()$first() - pl$element()$last()**2)$to_r()
 pl_element = function() pl$col("")
 
-#' pl$count
-#' @description Count the number of values in this column/context.
-#' @param column if dtype is:
-#' - Series: count length of Series
-#' - str: count values of this column
-#' - NULL: count the number of value in this context.
+#' Return the number of rows in the context.
 #'
-#'
-#' @keywords Expr_new
-#'
-#' @return Expr or value-count in case Series
-#'
+#' This is similar to `COUNT(*)` in SQL.
+#' @return [Expression][Expr_class] of data type [UInt32][pl_dtypes]
+#' @seealso
+#' - [`<Expr>$count()`][Expr_count]
 #' @examples
-#'
 #' df = pl$DataFrame(
-#'   a = c(1, 8, 3),
-#'   b = c(4, 5, 2),
+#'   a = c(1, 2, NA),
+#'   b = c(3, NA, NA),
 #'   c = c("foo", "bar", "foo")
 #' )
-#' df$select(pl$count())
 #'
+#' df$select(pl$len())
+pl_len = function() .pr$Expr$new_len()
+
+
+#' Return the number of non-null values in the column.
 #'
-#' df$group_by("c", maintain_order = TRUE)$agg(pl$count())
-pl_count = function(column = NULL) { # -> Expr | int:
-  if (is.null(column)) {
-    return(.pr$Expr$new_count())
-  }
-  if (inherits(column, "RPolarsSeries")) {
-    return(column$len())
-  }
-  # add context to any error from pl$col
-  unwrap(result(pl$col(column)$count()), "in pl$count():")
+#' This function is syntactic sugar for `pl$col(...)$count()`.
+#'
+#' Calling this function without any arguments returns the number of rows in the context.
+#' This way of using the function is deprecated.
+#' Please use [`pl$len()`][pl_len] instead.
+#'
+#' @inheritParams pl_head
+#' @inherit pl_len return
+#' @seealso
+#' - [`pl$len()`][pl_len]
+#' - [`<Expr>$count()`][Expr_count]
+#' @examples
+#' df = pl$DataFrame(
+#'   a = c(1, 2, NA),
+#'   b = c(3, NA, NA),
+#'   c = c("foo", "bar", "foo")
+#' )
+#'
+#' df$select(pl$count("a"))
+#'
+#' df$select(pl$count(c("b", "c")))
+pl_count = function(...) {
+  result(pl$col(...)$count()) |>
+    unwrap("in pl$count():")
 }
 
 #' Aggregate all column values into a list.
@@ -127,95 +180,85 @@ pl_implode = function(name) { # -> Expr
     unwrap("in pl$implode():")
 }
 
-#' pl$first
-#' @description  Depending on the input type this function does different things:
-#' @param column if dtype is:
-#' - Series: Take first value in `Series`
-#' - str: syntactic sugar for `pl.col(..).first()`
-#' - NULL: expression to take first column of a context.
+#' Get the first value.
 #'
-#'
-#' @keywords Expr_new
-#'
-#' @return Expr or first value of input Series
-#'
+#' This function has different behavior depending on arguments:
+#' - Missing -> Takes first column of a context.
+#' - Character vectors -> Syntactic sugar for `pl$col(...)$first()`.
+#' @param ... Characters indicating the column names
+#' (passed to [`pl$col()`][pl_col], see [`?pl_col`][pl_col] for details),
+#' or empty. If empty (default), returns an expression to take the first column
+#' of the context instead.
+#' @inherit pl_head return
+#' @seealso
+#' - [`<Expr>$first()`][Expr_first]
 #' @examples
-#'
 #' df = pl$DataFrame(
 #'   a = c(1, 8, 3),
 #'   b = c(4, 5, 2),
 #'   c = c("foo", "bar", "foo")
 #' )
+#'
 #' df$select(pl$first())
 #'
-#' df$select(pl$first("a"))
+#' df$select(pl$first("b"))
 #'
-#' pl$first(df$get_column("a"))
-#'
-pl_first = function(column = NULL) { #-> Expr | Any:
-  pcase(
-    is.null(column), Ok(.pr$Expr$new_first()),
-    inherits(column, "RPolarsSeries"), if (column$len() == 0) {
-      Err("The series is empty, so no first value can be returned.")
-    } else {
-      # TODO impl a direct slicing Series e.g. as pl$lit(series)$slice(x,y)$to_r()
-      # or if rust series has a dedicated method.
-      Ok(pl$lit(column)$slice(0, 1)$to_r())
-    },
-    # pl$col is fallible catch any error result and add new calling context
-    or_else = result(pl$col(column)$first())
-  ) |>
+#' df$select(pl$first(c("a", "c")))
+pl_first = function(...) {
+  if (!nargs()) {
+    res = result(.pr$Expr$new_first())
+  } else {
+    res = result(pl$col(...)$first())
+  }
+
+  res |>
     unwrap("in pl$first():")
 }
 
-#' pl$last
-#' @description Depending on the input type this function does different things:
-#' @param column if dtype is:
-#' - Series: Take last value in `Series`
-#' - str: syntactic sugar for `pl.col(..).last()`
-#' - NULL: expression to take last column of a context.
+#' Get the last value.
 #'
-#' @keywords Expr_new
-#'
-#' @return Expr or last value of input Series
-#'
+#' This function has different behavior depending on the input type:
+#' - Missing -> Takes last column of a context.
+#' - Character vectors -> Syntactic sugar for `pl$col(...)$last()`.
+#' @param ... Characters indicating the column names
+#' (passed to [`pl$col()`][pl_col], see [`?pl_col`][pl_col] for details),
+#' or empty. If empty (default), returns an expression to take the last column
+#' of the context instead.
+#' @inherit pl_first return
+#' @seealso
+#' - [`<Expr>$last()`][Expr_last]
 #' @examples
-#'
 #' df = pl$DataFrame(
 #'   a = c(1, 8, 3),
 #'   b = c(4, 5, 2),
-#'   c = c("foo", "bar", "foo")
+#'   c = c("foo", "bar", "baz")
 #' )
+#'
 #' df$select(pl$last())
 #'
 #' df$select(pl$last("a"))
 #'
-#' pl$last(df$get_column("a"))
-#'
-pl_last = function(column = NULL) { #-> Expr | Any:
-  pcase(
-    is.null(column), Ok(.pr$Expr$new_last()),
-    inherits(column, "RPolarsSeries"), if (column$len() == 0) {
-      Err("The series is empty, so no last value can be returned.")
-    } else {
-      # TODO impl a direct slicing Series e.g. as pl$lit(series)$slice(x,y)$to_r()
-      # or if rust series has a dedicated method.
-      Ok(pl$lit(column)$slice(-1, 1)$to_r())
-    },
-    # pl$col is fallible catch any error result and add new calling context
-    or_else = result(pl$col(column)$last())
-  ) |>
+#' df$select(pl$last(c("b", "c")))
+pl_last = function(...) {
+  if (!nargs()) {
+    res = result(.pr$Expr$new_last())
+  } else {
+    res = result(pl$col(...)$last())
+  }
+
+  res |>
     unwrap("in pl$last():")
 }
 
 #' Get the first `n` rows.
 #'
-#' @param column if dtype is:
-#' - Series: Take head value in `Series`
-#' - str or int: syntactic sugar for `pl.col(..).head()`
-#' @param n Number of rows to take
-#' @keywords Expr_new
-#' @return Expr or head value of input Series
+#' This function is syntactic sugar for `pl$col(...)$head(n)`.
+#' @param ... Characters indicating the column names, passed to [`pl$col()`][pl_col].
+#' See [`?pl_col`][pl_col] for details.
+#' @param n Number of rows to return.
+#' @return [Expr][Expr_class]
+#' @seealso
+#' - [`<Expr>$head()`][Expr_head]
 #' @examples
 #' df = pl$DataFrame(
 #'   a = c(1, 8, 3),
@@ -223,33 +266,22 @@ pl_last = function(column = NULL) { #-> Expr | Any:
 #'   c = c("foo", "bar", "foo")
 #' )
 #'
-#' expr_head = pl$head("a")
-#' print(expr_head)
-#' df$select(expr_head)
+#' df$select(pl$head("a"))
 #'
-#' df$select(pl$head("a", 2))
-#' pl$head(df$get_column("a"), 2)
-pl_head = function(column, n = 10) { #-> Expr | Any:
-  pcase(
-    inherits(column, "RPolarsSeries"), result(column$expr$head(n)),
-    is.character(column), result(pl$col(column)$head(n)),
-    inherits(column, "RPolarsExpr"), result(column$head(n)),
-    or_else = Err(paste0(
-      "param [column] type is neither Series, charvec nor Expr, but ",
-      str_string(column)
-    ))
-  ) |>
+#' df$select(pl$head("a", "b", n = 2))
+pl_head = function(..., n = 10) {
+  result(pl$col(...)$head(n)) |>
     unwrap("in pl$head():")
 }
 
 
 #' Get the last `n` rows.
 #'
-#' @param column if dtype is:
-#' - Series: Take tail value in `Series`
-#' - str or in: syntactic sugar for `pl.col(..).tail()`
-#' @param n Number of rows to take
-#' @return Expr or tail value of input Series
+#' This function is syntactic sugar for `pl$col(...)$tail(n)`.
+#' @inheritParams pl_head
+#' @inherit pl_head return
+#' @seealso
+#' - [`<Expr>$tail()`][Expr_tail]
 #' @examples
 #' df = pl$DataFrame(
 #'   a = c(1, 8, 3),
@@ -257,296 +289,177 @@ pl_head = function(column, n = 10) { #-> Expr | Any:
 #'   c = c("foo", "bar", "foo")
 #' )
 #'
-#' expr_tail = pl$head("a")
-#' print(expr_tail)
-#' df$select(expr_tail)
+#' df$select(pl$tail("a"))
 #'
-#' df$select(pl$tail("a", 2))
-#'
-#' pl$tail(df$get_column("a"), 2)
-pl_tail = function(column, n = 10) { #-> Expr | Any:
-  pcase(
-    inherits(column, "RPolarsSeries"), result(column$expr$tail(n)),
-    is.character(column), result(pl$col(column)$tail(n)),
-    inherits(column, "RPolarsExpr"), result(column$tail(n)),
-    or_else = Err(paste0(
-      "param [column] type is neither Series, charvec nor Expr, but ",
-      str_string(column)
-    ))
-  ) |>
+#' df$select(pl$tail("a", "b", n = 2))
+pl_tail = function(..., n = 10) {
+  result(pl$col(...)$tail(n)) |>
     unwrap("in pl$tail():")
 }
 
-#' pl$mean
-#' @description Depending on the input type this function does different things:
-#' @param ... One or several elements:
-#' - Series: Take mean value in `Series`
-#' - DataFrame or LazyFrame: Take mean value of each column
-#' - character vector: parsed as column names
-#' - NULL: expression to take mean column of a context.
+# TODO: add pl_mean_horizontal
+#' Get the mean value.
 #'
-#' @keywords Expr_new
-#'
-#' @return Expr or mean value of input Series
-#'
+#' This function is syntactic sugar for `pl$col(...)$mean()`.
+#' @inheritParams pl_head
+#' @inherit pl_head return
+#' @seealso
+#' - [`<Expr>$mean()`][Expr_mean]
 #' @examples
-#'
 #' df = pl$DataFrame(
 #'   a = c(1, 8, 3),
 #'   b = c(4, 5, 2),
 #'   c = c("foo", "bar", "foo")
 #' )
+#'
 #' df$select(pl$mean("a"))
 #'
 #' df$select(pl$mean("a", "b"))
-#'
-pl_mean = function(...) { #-> Expr | Any:
-  column = list2(...)
-  lc = length(column)
-  stringflag = all(sapply(column, is_string))
-  pcase(
-    lc == 0L,
-    Err("pl$mean() needs at least one argument."),
-    lc > 1L && !stringflag,
-    Err("When there are more than one arguments in pl$mean(), all arguments must be strings."),
-    lc > 1L && stringflag,
-    Ok(pl$col(unlist(column))$mean()),
-    lc == 1L && inherits(column[[1]], "RPolarsSeries") && column[[1]]$len() == 0,
-    Err("The series is empty, so no mean value can be returned."),
-    lc == 1L && inherits(column[[1]], c("RPolarsSeries", "RPolarsLazyFrame", "RPolarsDataFrame")),
-    Ok(column[[1]]$mean()),
-    or_else = Ok(pl$col(column[[1]])$mean())
-  ) |>
+pl_mean = function(...) {
+  result(pl$col(...)$mean()) |>
     unwrap("in pl$mean():")
 }
 
-#' pl$median
-#' @description Depending on the input type this function does different things:
-#' @inheritParams pl_mean
+#' Get the median value.
 #'
-#' @keywords Expr_new
-#'
-#' @return Expr or median value of input Series
-#'
+#' This function is syntactic sugar for `pl$col(...)$median()`.
+#' @inheritParams pl_head
+#' @inherit pl_head return
+#' @seealso
+#' - [`<Expr>$median()`][Expr_median]
 #' @examples
-#'
 #' df = pl$DataFrame(
 #'   a = c(1, 8, 3),
 #'   b = c(4, 5, 2),
 #'   c = c("foo", "bar", "foo")
 #' )
+#'
 #' df$select(pl$median("a"))
 #'
 #' df$select(pl$median("a", "b"))
-#'
-pl_median = function(...) { #-> Expr | Any:
-  column = list2(...)
-  lc = length(column)
-  stringflag = all(sapply(column, is_string))
-  pcase(
-    lc == 0L,
-    Err("pl$median() needs at least one argument."),
-    lc > 1L && !stringflag,
-    Err("When there are more than one arguments in pl$median(), all arguments must be strings."),
-    lc > 1L && stringflag,
-    Ok(pl$col(unlist(column))$median()),
-    lc == 1L && inherits(column[[1]], "RPolarsSeries") && column[[1]]$len() == 0,
-    Err("The series is empty, so no median value can be returned."),
-    lc == 1L && inherits(column[[1]], c("RPolarsSeries", "RPolarsLazyFrame", "RPolarsDataFrame")),
-    Ok(column[[1]]$median()),
-    or_else = Ok(pl$col(column[[1]])$median())
-  ) |>
+pl_median = function(...) {
+  result(pl$col(...)$median()) |>
     unwrap("in pl$median():")
 }
 
-#' Count `n` unique values
-#' @description Depending on the input type this function does different things:
-#' @param column if dtype is:
-#' - Series: call method n_unique() to return value of unique values.
-#' - String: syntactic sugar for `pl$col(column)$n_unique()`, returns Expr
-#' - Expr: syntactic sugar for `column$n_unique()`, returns Expr
+#' Count unique values.
 #'
-#' @keywords Expr_new
-#'
-#' @return Expr or value
-#'
+#' This function is syntactic sugar for `pl$col(...)$n_unique()`.
+#' @inheritParams pl_head
+#' @inherit pl_head return
+#' @seealso
+#' - [`<Expr>$n_unique()`][Expr_n_unique]
 #' @examples
-#' # column as Series
-#' pl$n_unique(pl$Series(1:4)) == 4
+#' df = pl$DataFrame(
+#'   a = c(1, 8, 1),
+#'   b = c(4, 5, 2),
+#'   c = c("foo", "bar", "foo")
+#' )
 #'
-#' # column as String
-#' expr = pl$n_unique("bob")
-#' print(expr)
-#' pl$DataFrame(bob = 1:4)$select(expr)
+#' df$select(pl$n_unique("a"))
 #'
-#' # colum as Expr
-#' pl$DataFrame(bob = 1:4)$select(pl$n_unique(pl$col("bob")))
-pl_n_unique = function(column) { #-> int or Expr
-  pcase(
-    inherits(column, c("RPolarsSeries", "RPolarsExpr")), result(column$n_unique()),
-    is_string(column), result(pl$col(column)$n_unique()),
-    or_else = Err(paste("arg [column] is neither Series, Expr or String, but", str_string(column)))
-  ) |>
+#' df$select(pl$n_unique("b", "c"))
+pl_n_unique = function(...) {
+  result(pl$col(...)$n_unique()) |>
     unwrap("in pl$n_unique():")
 }
 
-#' Approximate count of unique values.
-#' @description This is done using the HyperLogLog++ algorithm for cardinality estimation.
-#' @param column if dtype is:
-#' - String: syntactic sugar for `pl$col(column)$approx_n_unique()`, returns Expr
-#' - Expr: syntactic sugar for `column$approx_n_unique()`, returns Expr
+#' Approximate count of unique values
 #'
-#' @keywords Expr_new
-#'
-#' @return Expr
-#'
-#' @details The approx_n_unique is likely only warranted for large columns. See example.
-#' It appears approx_n_unique scales better than n_unique, such that the relative performance
-#' difference increases with column size.
-#'
+#' This function is syntactic sugar for `pl$col(...)$approx_n_unique()`,
+#' and uses the HyperLogLog++ algorithm for cardinality estimation.
+#' @inheritParams pl_head
+#' @inherit pl_head return
+#' @seealso
+#' - [`<Expr>$approx_n_unique()`][Expr_approx_n_unique]
 #' @examples
-#' # column as Series
-#' pl$approx_n_unique(pl$lit(1:4)) == 4
+#' df = pl$DataFrame(
+#'   a = c(1, 8, 1),
+#'   b = c(4, 5, 2),
+#'   c = c("foo", "bar", "foo")
+#' )
 #'
-#' # column as String
-#' expr = pl$approx_n_unique("bob")
-#' print(expr)
-#' pl$DataFrame(bob = 1:80)$select(expr)
+#' df$select(pl$approx_n_unique("a"))
 #'
-#' # colum as Expr
-#' pl$DataFrame(bob = 1:4)$select(pl$approx_n_unique(pl$col("bob")))
-#'
-#' # comparison with n_unique for 2 million integers. (try change example to 20 million ints)
-#' lit_series = pl$lit(c(1:1E6, 1E6:1, 1:1E6))
-#' system.time(pl$approx_n_unique(lit_series)$to_series()$print())
-#' system.time(pl$n_unique(lit_series)$to_series()$print())
-pl_approx_n_unique = function(column) { #-> int or Expr
-  pcase(
-    inherits(column, "RPolarsExpr"), result(column$approx_n_unique()),
-    is_string(column), result(pl$col(column)$approx_n_unique()),
-    or_else = Err(paste("arg [column] is neither Expr or String, but", str_string(column)))
-  ) |>
+#' df$select(pl$approx_n_unique("b", "c"))
+pl_approx_n_unique = function(...) {
+  result(pl$col(...)$approx_n_unique()) |>
     unwrap("in pl$approx_n_unique():")
 }
 
-#' Compute sum in one or several columns
+#' Sum all values.
 #'
-#' This is syntactic sugar for `pl$col(...)$sum()`.
-#'
-#' @param ...  One or several elements. Each element can be:
-#'  - Series or Expr
-#'  - string, that is parsed as columns
-#'  - numeric, that is parsed as literal
-#'
-#' @return Expr
-#' @keywords Expr_new
+#' Syntactic sugar for `pl$col(...)$sum()`.
+#' @inheritParams pl_head
+#' @inherit pl_head return
+#' @seealso
+#' - [`<Expr>$sum()`][Expr_sum]
+#' - [`pl$sum_horizontal()`][pl_sum_horizontal]
 #' @examples
-#' # column as string
-#' pl$DataFrame(iris)$select(pl$sum("Petal.Width"))
+#' df = pl$DataFrame(col_a = 1:2, col_b = 3:4, c = 5:6)
 #'
-#' # column as Expr (prefer pl$col("Petal.Width")$sum())
-#' pl$DataFrame(iris)$select(pl$sum(pl$col("Petal.Width")))
+#' df$select(pl$sum("col_a"))
 #'
-#' df = pl$DataFrame(a = 1:2, b = 3:4, c = 5:6)
+#' # Sum multiple columns
+#' df$select(pl$sum("col_a", "col_b"))
 #'
-#' # Compute sum in several columns
-#' df$with_columns(pl$sum("*"))
+#' df$select(pl$sum("^col_.*$"))
 pl_sum = function(...) {
-  column = list2(...)
-  if (length(column) == 1L) column = column[[1L]]
-  if (inherits(column, "RPolarsSeries") || inherits(column, "RPolarsExpr")) {
-    return(column$sum())
-  }
-  if (is_string(column)) {
-    return(pl$col(column)$sum())
-  }
-  if (is.numeric(column)) {
-    return(pl$lit(column)$sum())
-  }
-  if (is.list(column)) {
-    return(pl$col(column)$sum())
-  }
-  stop("pl$sum: this input is not supported")
+  result(pl$col(...)$sum()) |>
+    unwrap("in pl$sum():")
 }
 
 
-#' Find minimum value in one or several columns
+#' Get the minimum value.
 #'
-#' This is syntactic sugar for `pl$col(...)$min()`.
-#' @param ...  is a:
-#' If one arg:
-#'  - Series or Expr, same as `column$sum()`
-#'  - string, same as `pl$col(column)$sum()`
-#'  - numeric, same as `pl$lit(column)$sum()`
-#'  - list of strings(column names) or expressions to add up as expr1 + expr2 + expr3 + ...
-#' If several args, then wrapped in a list and handled as above.
-#'
-#' @return Expr
-#' @keywords Expr_new
+#' Syntactic sugar for `pl$col(...)$min()`.
+#' @inheritParams pl_sum
+#' @inherit pl_sum return
+#' @seealso
+#' - [`<Expr>$min()`][Expr_min]
+#' - [`pl$min_horizontal()`][pl_min_horizontal]
 #' @examples
 #' df = pl$DataFrame(
-#'   a = NA_real_,
-#'   b = c(1:2, NA_real_, NA_real_),
-#'   c = c(1:4)
+#'   num_1 = c(1, 8, 3),
+#'   num_2 = c(4, 5, 2),
+#'   chr_1 = c("foo", "bar", "foo")
 #' )
-#' df
 #'
+#' df$select(pl$min("num_1"))
+#'
+#' # Get the minimum value of multiple columns.
+#' df$select(pl$min(r"(^num_\d+$)"))
+#'
+#' df$select(pl$min("num_1", "num_2"))
 pl_min = function(...) {
-  column = list2(...)
-  if (length(column) == 1L) column = column[[1L]]
-  if (inherits(column, "RPolarsSeries") || inherits(column, "RPolarsExpr")) {
-    return(column$min())
-  }
-  if (is_string(column)) {
-    return(pl$col(column)$min())
-  }
-  if (is.numeric(column)) {
-    return(pl$lit(column)$min())
-  }
-  if (is.list(column)) {
-    return(pl$col(column)$min())
-  }
-  stop("pl$min: this input is not supported")
+  result(pl$col(...)$min()) |>
+    unwrap("in pl$min():")
 }
 
-#' Find maximum value in one or several columns
+#' Get the maximum value.
 #'
-#' This is syntactic sugar for `pl$col(...)$max()`.
-#' @param ...  is a:
-#' If one arg:
-#'  - Series or Expr, same as `column$sum()`
-#'  - string, same as `pl$col(column)$sum()`
-#'  - numeric, same as `pl$lit(column)$sum()`
-#'  - list of strings(column names) or expressions to add up as expr1 + expr2 + expr3 + ...
-#'
-#' If several args, then wrapped in a list and handled as above.
-#'
-#' @return Expr
-#' @keywords Expr_new
+#' Syntactic sugar for `pl$col(...)$max()`.
+#' @inheritParams pl_sum
+#' @inherit pl_sum return
+#' @seealso
+#' - [`<Expr>$max()`][Expr_max]
+#' - [`pl$max_horizontal()`][pl_max_horizontal]
 #' @examples
 #' df = pl$DataFrame(
-#'   a = NA_real_,
-#'   b = c(1:2, NA_real_, NA_real_),
-#'   c = c(1:4)
+#'   num_1 = c(1, 8, 3),
+#'   num_2 = c(4, 5, 2),
+#'   chr_1 = c("foo", "bar", "foo")
 #' )
-#' df
 #'
+#' df$select(pl$max("num_1"))
+#'
+#' # Get the maximum value of multiple columns.
+#' df$select(pl$max(r"(^num_\d+$)"))
+#'
+#' df$select(pl$max("num_1", "num_2"))
 pl_max = function(...) {
-  column = list2(...)
-  if (length(column) == 1L) column = column[[1L]]
-  if (inherits(column, "RPolarsSeries") || inherits(column, "RPolarsExpr")) {
-    return(column$max())
-  }
-  if (is_string(column)) {
-    return(pl$col(column)$max())
-  }
-  if (is.numeric(column)) {
-    return(pl$lit(column)$max())
-  }
-  if (is.list(column)) {
-    return(pl$col(column)$max())
-  }
-  stop("pl$max: this input is not supported")
+  result(pl$col(...)$max()) |>
+    unwrap("in pl$max():")
 }
 
 #' Coalesce
@@ -580,40 +493,51 @@ pl_coalesce = function(...) {
 }
 
 
-#' Standard deviation
-#' @description  syntactic sugar for starting a expression with std
-#' @param column Column name.
-#' @param ddof Delta Degrees of Freedom: the divisor used in the calculation is
-#' N - ddof, where N represents the number of elements. By default ddof is 1.
-#' @return Expr or Series matching type of input column
-pl_std = function(column, ddof = 1) {
-  if (inherits(column, "RPolarsSeries") || inherits(column, "RPolarsExpr")) {
-    return(column$std(ddof))
-  }
-  if (is_string(column)) {
-    return(pl$col(column)$std(ddof))
-  }
-  if (is.numeric(column)) {
-    return(pl$lit(column)$std(ddof))
-  }
-  stop("pl$std: this input is not supported")
+#' Get the standard deviation.
+#'
+#' This function is syntactic sugar for `pl$col(...)$std(ddof)`.
+#' @inheritParams pl_sum
+#' @param ddof An integer representing "Delta Degrees of Freedom":
+#' the divisor used in the calculation is `N - ddof`,
+#' where `N` represents the number of elements. By default ddof is `1`.
+#' @inherit pl_sum return
+#' @seealso
+#' - [`<Expr>$std()`][Expr_std]
+#' @examples
+#' df = pl$DataFrame(
+#'   a = c(1, 8, 3),
+#'   b = c(4, 5, 2),
+#'   c = c("foo", "bar", "foo")
+#' )
+#'
+#' df$select(pl$std("a"))
+#'
+#' df$select(pl$std(c("a", "b")))
+pl_std = function(..., ddof = 1) {
+  result(pl$col(...)$std(ddof)) |>
+    unwrap("in pl$std():")
 }
 
-#' Variance
-#' @description  syntactic sugar for starting a expression with var
+#' Get the variance.
+#'
+#' This function is syntactic sugar for `pl$col(...)$var(ddof)`.
 #' @inheritParams pl_std
-#' @return Expr or Series matching type of input column
-pl_var = function(column, ddof = 1) {
-  if (inherits(column, "RPolarsSeries") || inherits(column, "RPolarsExpr")) {
-    return(column$var(ddof))
-  }
-  if (is_string(column)) {
-    return(pl$col(column)$var(ddof))
-  }
-  if (is.numeric(column)) {
-    return(pl$lit(column)$var(ddof))
-  }
-  stop("pl$var: this input is not supported")
+#' @inherit pl_sum return
+#' @seealso
+#' - [`<Expr>$var()`][Expr_var]
+#' @examples
+#' df = pl$DataFrame(
+#'   a = c(1, 8, 3),
+#'   b = c(4, 5, 2),
+#'   c = c("foo", "bar", "foo")
+#' )
+#'
+#' df$select(pl$var("a"))
+#'
+#' df$select(pl$var("a", "b"))
+pl_var = function(..., ddof = 1) {
+  result(pl$col(...)$var(ddof)) |>
+    unwrap("in pl$var():")
 }
 
 
@@ -648,27 +572,24 @@ pl_concat_list = function(exprs) {
     unwrap(" in pl$concat_list():")
 }
 
-#' struct
-#' @aliases struct
-#' @description Collect several columns into a Series of dtype Struct.
+#' Collect columns into a struct column
+#'
 #' @param exprs Columns/Expressions to collect into a Struct.
-#' @param eager Evaluate immediately.
-#' @param schema Optional schema named list that explicitly defines the struct field dtypes.
-#' Each name must match a column name wrapped in the struct. Can only be used to cast some or all
-#' dtypes, not to change the names. NULL means to include keep columns into the struct by their
-#' current DataType. If a column is not included in the schema it is removed from the final struct.
+#' @param schema Optional schema named list that explicitly defines the struct
+#'   field dtypes. Each name must match a column name wrapped in the struct. Can
+#'   only be used to cast some or all dtypes, not to change the names. If `NULL`
+#'   (default), columns datatype are not modified. Columns that do not exist are
+#'   silently ignored and not included in the final struct.
 #'
-#' @details pl$struct creates Expr or Series of DataType Struct()
-#' pl$Struct creates the DataType Struct()
-#' In polars a schema is a named list of DataTypes. #' A schema describes e.g. a DataFrame.
-#' More formally schemas consist of Fields.
-#' A Field is an object describing the name and DataType of a column/Series, but same same.
-#' A struct is a DataFrame wrapped into a Series, the DataType is Struct, and each
-#' sub-datatype within are Fields.
-#' In a dynamic language schema and a Struct (the DataType) are quite the same, except
-#' schemas describe DataFrame and Struct's describe some Series.
+#' @details
 #'
-#' @return Eager=FALSE: Expr of Series with dtype Struct | Eager=TRUE: Series with dtype Struct
+#' `pl$struct()` creates an Expr of DataType [`Struct()`][DataType_Struct].
+#'
+#' Compared to the Python implementation, `pl$struct()` doesn't have the
+#' argument `eager` and always returns an Expr. Use `$to_series()` to return a
+#' Series.
+#'
+#' @return Expr with dtype Struct
 #'
 #' @examples
 #' # isolated expression to wrap all columns in a struct aliased 'my_struct'
@@ -711,10 +632,7 @@ pl_concat_list = function(exprs) {
 #'
 #' df$select(e2)
 #' df$select(e2)$to_data_frame()
-pl_struct = function(
-    exprs, # list of exprs, str or Series or Expr or Series,
-    eager = FALSE,
-    schema = NULL) {
+pl_struct = function(exprs, schema = NULL) {
   # convert any non expr to expr and catch error in a result
   as_struct(wrap_elist_result(exprs, str_to_lit = FALSE)) |>
     and_then(\(struct_expr) { # if no errors continue struct_expr
@@ -722,14 +640,7 @@ pl_struct = function(
       if (!is.null(schema)) {
         struct_expr = struct_expr$cast(pl$Struct(schema))
       }
-      if (!is_scalar_bool(eager)) {
-        return(Err("arg [eager] is not a bool"))
-      }
-      if (eager) {
-        result(pl$select(struct_expr)$to_series())
-      } else {
-        Ok(struct_expr)
-      }
+      Ok(struct_expr)
     }) |>
     unwrap( # raise any error with context
       "in pl$struct:"
@@ -743,26 +654,32 @@ pl_struct = function(
 #' are parsed as literals. Non-String columns are cast to String
 #' @param separator String that will be used to separate the values of each
 #' column.
+#' @param ignore_nulls If `FALSE` (default), null values are propagated: if the
+#' row contains any null values, the output is null.
 #' @return Expr
 #' @examples
 #' df = pl$DataFrame(
-#'   a = c(1, 2, 3),
+#'   a = 1:3,
 #'   b = c("dogs", "cats", NA),
 #'   c = c("play", "swim", "walk")
 #' )
 #'
 #' df$with_columns(
 #'   pl$concat_str(
-#'     pl$col("a") * 2,
-#'     "b",
-#'     "c",
-#'     pl$lit("!"),
+#'     pl$col("a") * 2L, "b", "c", pl$lit("!"),
 #'     separator = " "
 #'   )$alias("full_sentence")
 #' )
 #'
-pl_concat_str = function(..., separator = "") {
-  concat_str(list2(...), separator) |> unwrap("in $concat_str()")
+#' df$with_columns(
+#'   pl$concat_str(
+#'     pl$col("a") * 2L, "b", "c", pl$lit("!"),
+#'     separator = " ",
+#'     ignore_nulls = TRUE
+#'   )$alias("full_sentence")
+#' )
+pl_concat_str = function(..., separator = "", ignore_nulls = FALSE) {
+  concat_str(list2(...), separator, ignore_nulls) |> unwrap("in $concat_str()")
 }
 
 #' Covariance
@@ -1092,7 +1009,7 @@ pl_duration = function(
 #' @param column An Expr from which integers will be parsed. If this is a float
 #' column, then the decimal part of the float will be ignored. Character are
 #' parsed as column names, but other literal values must be passed to
-#' [`pl$lit()`][Expr_lit].
+#' [`pl$lit()`][pl_lit].
 #' @param time_unit One of `"ns"`, `"us"`, `"ms"`, `"s"`, `"d"`
 #'
 #' @return Expr as Date or [Datetime][DataType_Datetime] depending on the
@@ -1127,6 +1044,6 @@ pl_from_epoch = function(column, time_unit = "s") {
   switch(time_unit,
     "d" = column$cast(pl$Date),
     "s" = (column$cast(pl$Int64) * 1000000L)$cast(pl$Datetime("us")),
-    column$cast(pl$Datetime(tu = time_unit))
+    column$cast(pl$Datetime(time_unit))
   )
 }

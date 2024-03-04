@@ -1,7 +1,7 @@
 #' Get the length of each list
 #'
 #' Return the number of elements in each list. Null values are counted in the
-#' total. `$list$lengths()` is deprecated.
+#' total.
 #'
 #' @return Expr
 #' @aliases list_len
@@ -10,18 +10,12 @@
 #' df$with_columns(len_list = pl$col("list_of_strs")$list$len())
 ExprList_len = function() .pr$Expr$list_len(self)
 
-#' @rdname ExprList_len
-ExprList_lengths = function() {
-  warning("`$list$lengths()` is deprecated and will be removed in 0.14.0. Use `$list$len()` instead")
-  .pr$Expr$list_len(self)
-}
-
 #' Sum all elements in a list
 #'
 #' @return Expr
 #' @aliases list_sum
 #' @examples
-#' df = pl$DataFrame(list(values = list(c(1, 2, 3, NA), c(2, 3), NA_real_)))
+#' df = pl$DataFrame(values = list(c(1, 2, 3, NA), c(2, 3), NA_real_))
 #' df$with_columns(sum = pl$col("values")$list$sum())
 ExprList_sum = function() .pr$Expr$list_sum(self)
 
@@ -30,7 +24,7 @@ ExprList_sum = function() .pr$Expr$list_sum(self)
 #' @return Expr
 #' @aliases list_max
 #' @examples
-#' df = pl$DataFrame(list(values = list(c(1, 2, 3, NA), c(2, 3), NA_real_)))
+#' df = pl$DataFrame(values = list(c(1, 2, 3, NA), c(2, 3), NA_real_))
 #' df$with_columns(max = pl$col("values")$list$max())
 ExprList_max = function() .pr$Expr$list_max(self)
 
@@ -39,7 +33,7 @@ ExprList_max = function() .pr$Expr$list_max(self)
 #' @return Expr
 #' @aliases list_min
 #' @examples
-#' df = pl$DataFrame(list(values = list(c(1, 2, 3, NA), c(2, 3), NA_real_)))
+#' df = pl$DataFrame(values = list(c(1, 2, 3, NA), c(2, 3), NA_real_))
 #' df$with_columns(min = pl$col("values")$list$min())
 ExprList_min = function() .pr$Expr$list_min(self)
 
@@ -48,7 +42,7 @@ ExprList_min = function() .pr$Expr$list_min(self)
 #' @return Expr
 #' @aliases list_mean
 #' @examples
-#' df = pl$DataFrame(list(values = list(c(1, 2, 3, NA), c(2, 3), NA_real_)))
+#' df = pl$DataFrame(values = list(c(1, 2, 3, NA), c(2, 3), NA_real_))
 #' df$with_columns(mean = pl$col("values")$list$mean())
 ExprList_mean = function() .pr$Expr$list_mean(self)
 
@@ -58,7 +52,7 @@ ExprList_mean = function() .pr$Expr$list_mean(self)
 #' @return Expr
 #' @aliases list_sort
 #' @examples
-#' df = pl$DataFrame(list(values = list(c(1, 2, 3, NA), c(2, 3), NA_real_)))
+#' df = pl$DataFrame(values = list(c(NA, 2, 1, 3), c(Inf, 2, 3, NaN), NA_real_))
 #' df$with_columns(sort = pl$col("values")$list$sort())
 ExprList_sort = function(descending = FALSE) .pr$Expr$list_sort(self, descending)
 
@@ -67,21 +61,27 @@ ExprList_sort = function(descending = FALSE) .pr$Expr$list_sort(self, descending
 #' @return Expr
 #' @aliases list_reverse
 #' @examples
-#' df = pl$DataFrame(list(values = list(c(1, 2, 3, NA), c(2, 3), NA_real_)))
+#' df = pl$DataFrame(values = list(c(1, 2, 3, NA), c(2, 3), NA_real_))
 #' df$with_columns(reverse = pl$col("values")$list$reverse())
 ExprList_reverse = function() .pr$Expr$list_reverse(self)
 
 #' Get unique values in a list
 #'
-#' @description
-#' Get the unique/distinct values in the list.
-#'
 #' @return Expr
 #' @aliases list_unique
 #' @examples
-#' df = pl$DataFrame(list(values = list(c(2, 2, NA), c(1, 2, 3), NA_real_)))
+#' df = pl$DataFrame(values = list(c(2, 2, NA), c(1, 2, 3), NA_real_))
 #' df$with_columns(unique = pl$col("values")$list$unique())
 ExprList_unique = function() .pr$Expr$list_unique(self)
+
+#' Get the number of unique values in a list
+#'
+#' @return Expr
+#' @aliases list_n_unique
+#' @examples
+#' df = pl$DataFrame(values = list(c(2, 2, NA), c(1, 2, 3), NA_real_))
+#' df$with_columns(unique = pl$col("values")$list$n_unique())
+ExprList_n_unique = function() .pr$Expr$list_n_unique(self)
 
 #' Concat two list variables
 #'
@@ -145,19 +145,46 @@ ExprList_get = function(index) .pr$Expr$list_get(self, wrap_e(index, str_to_lit 
 #' @return Expr
 #' @aliases list_gather
 #' @examples
-#' df = pl$DataFrame(list(a = list(c(3, 2, 1), 1, c(1, 2)))) #
-#' idx = pl$Series(list(0:1, integer(), c(1L, 999L)))
-#' df$select(pl$col("a")$list$gather(pl$lit(idx), null_on_oob = TRUE))
+#' df = pl$DataFrame(
+#'   a = list(c(3, 2, 1), 1, c(1, 2)),
+#'   idx = list(0:1, integer(), c(1L, 999L))
+#' )
+#' df$with_columns(
+#'   gathered = pl$col("a")$list$gather("idx", null_on_oob = TRUE)
+#' )
 #'
-#' # with implicit conversion to Expr
-#' df$select(pl$col("a")$list$gather(list(0:1, integer(), c(1L, 999L)), null_on_oob = TRUE))
+#' df$with_columns(
+#'   gathered = pl$col("a")$list$gather(2, null_on_oob = TRUE)
+#' )
 #'
 #' # by some column name, must cast to an Int/Uint type to work
-#' df$select(pl$col("a")$list$gather(pl$col("a")$cast(pl$List(pl$UInt64)), null_on_oob = TRUE))
+#' df$with_columns(
+#'   gathered = pl$col("a")$list$gather(pl$col("a")$cast(pl$List(pl$UInt64)), null_on_oob = TRUE)
+#' )
 ExprList_gather = function(index, null_on_oob = FALSE) {
-  expr = wrap_e(index, str_to_lit = FALSE)
-  .pr$Expr$list_gather(self, expr, null_on_oob) |>
+  .pr$Expr$list_gather(self, index, null_on_oob) |>
     unwrap("in $gather()")
+}
+
+#' Gather every nth element in a list
+#'
+#' @inheritParams Expr_gather_every
+#'
+#' @return Expr
+#'
+#' @examples
+#' df = pl$DataFrame(
+#'   a = list(1:5, 6:8, 9:12),
+#'   n = c(2, 1, 3),
+#'   offset = c(0, 1, 0)
+#' )
+#'
+#' df$with_columns(
+#'   gather_every = pl$col("a")$list$gather_every(pl$col("n"), offset = pl$col("offset"))
+#' )
+ExprList_gather_every = function(n, offset = 0) {
+  .pr$Expr$list_gather_every(self, n, offset) |>
+    unwrap("in $gather_every()")
 }
 
 #' Get the first value in a list
@@ -207,6 +234,7 @@ ExprList_contains = function(item) .pr$Expr$list_contains(self, wrap_e(item))
 #'
 #' @param separator String to separate the items with. Can be an Expr. Strings
 #'   are *not* parsed as columns.
+#' @inheritParams pl_concat_str
 #'
 #' @return Expr
 #' @aliases list_join
@@ -217,10 +245,11 @@ ExprList_contains = function(item) .pr$Expr$list_contains(self, wrap_e(item))
 #' )
 #' df$with_columns(
 #'   join_with_expr = pl$col("s")$list$join(pl$col("separator")),
-#'   join_with_lit = pl$col("s")$list$join(" ")
+#'   join_with_lit = pl$col("s")$list$join(" "),
+#'   join_ignore_null = pl$col("s")$list$join(" ", ignore_nulls = TRUE)
 #' )
-ExprList_join = function(separator) {
-  .pr$Expr$list_join(self, separator) |>
+ExprList_join = function(separator, ignore_nulls = FALSE) {
+  .pr$Expr$list_join(self, separator, ignore_nulls) |>
     unwrap("in $list$join():")
 }
 
@@ -247,8 +276,6 @@ ExprList_arg_min = function() .pr$Expr$list_arg_min(self)
 ExprList_arg_max = function() .pr$Expr$list_arg_max(self)
 
 
-## TODO contribute polars support negative n values for Diff sublist
-
 #' Compute difference between list values
 #'
 #' This computes the first discrete difference between shifted items of every
@@ -256,7 +283,7 @@ ExprList_arg_max = function() .pr$Expr$list_arg_max(self)
 #' = 2` the output will be the difference between the 1st and the 3rd value, the
 #' 2nd and 4th value, etc.
 #'
-#' @param n Number of slots to shift.
+#' @param n Number of slots to shift. If negative, then it starts from the end.
 #' @param null_behavior How to handle `null` values. Either `"ignore"` (default)
 #'   or `"drop"`.
 #'
@@ -265,6 +292,9 @@ ExprList_arg_max = function() .pr$Expr$list_arg_max(self)
 #' @examples
 #' df = pl$DataFrame(list(s = list(1:4, c(10L, 2L, 1L))))
 #' df$with_columns(diff = pl$col("s")$list$diff(2))
+#'
+#' # negative value starts shifting from the end
+#' df$with_columns(diff = pl$col("s")$list$diff(-2))
 ExprList_diff = function(n = 1, null_behavior = c("ignore", "drop")) {
   .pr$Expr$list_diff(self, n, null_behavior) |>
     unwrap("in $list$diff()")
@@ -318,9 +348,6 @@ ExprList_slice = function(offset, length = NULL) {
   }
   .pr$Expr$list_slice(self, offset, length)
 }
-
-
-# TODO contribute polars let head and tail support negative indicies also regular head tail
 
 #' Get the first `n` values of a list
 #'
@@ -416,7 +443,7 @@ ExprList_to_struct = function(
     fields = NULL,
     upper_bound = 0) {
   .pr$Expr$list_to_struct(self, n_field_strategy, fields, upper_bound) |>
-    unwrap("in <List>$to_struct():")
+    unwrap("in $list$to_struct():")
 }
 
 #' Run any polars expression on the list values
@@ -435,17 +462,27 @@ ExprList_to_struct = function(
 #'   a = list(c(1, 8, 3), c(3, 2), c(NA, NA, 1)),
 #'   b = list(c("R", "is", "amazing"), c("foo", "bar"), "text")
 #' )
-#' df$with_columns(
-#'   # standardize each value inside a list, using only the values in this list
+#'
+#' df
+#'
+#' # standardize each value inside a list, using only the values in this list
+#' df$select(
 #'   a_stand = pl$col("a")$list$eval(
 #'     (pl$element() - pl$element()$mean()) / pl$element()$std()
-#'   ),
+#'   )
+#' )
 #'
-#'   # count characters for each element in list. Since column "b" is list[str],
-#'   # we can apply all `$str` functions on elements in the list:
+#' # count characters for each element in list. Since column "b" is list[str],
+#' # we can apply all `$str` functions on elements in the list:
+#' df$select(
 #'   b_len_chars = pl$col("b")$list$eval(
 #'     pl$element()$str$len_chars()
 #'   )
+#' )
+#'
+#' # concat strings in each list
+#' df$select(
+#'   pl$col("b")$list$eval(pl$element()$str$concat(" "))$list$first()
 #' )
 ExprList_eval = function(expr, parallel = FALSE) {
   .pr$Expr$list_eval(self, expr, parallel)

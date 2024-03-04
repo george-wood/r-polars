@@ -49,7 +49,34 @@ check_no_missing_args = function(
 }
 
 
+# https://stackoverflow.com/a/27350487/3297472
+is_null_external_pointer = function(pointer) {
+  a = attributes(pointer)
+  attributes(pointer) = NULL
+  out = identical(pointer, new("externalptr"))
+  attributes(pointer) = a
+  out
+}
 
+
+verify_not_null_pointer = function(pointer, context = NULL) {
+  valid = FALSE
+  tryCatch(
+    {
+      valid = !is_null_external_pointer(pointer)
+    },
+    error = function(c) {}
+  )
+
+  if (!valid) {
+    Err_plain(
+      "This Polars object is not valid. Execute `rm(<object>)` to remove the object or restart the R session."
+    ) |>
+      unwrap(context = context)
+  }
+
+  invisible(NULL)
+}
 
 
 #' Verify user selected method/attribute exists
@@ -68,21 +95,11 @@ verify_method_call = function(Class_env, Method_name, call = sys.call(sys.nframe
   }
   if (!Method_name %in% names(Class_env)) {
     class_name = class_name %||% as.character(as.list(match.call())$Class_env)
-    stop(
+    Err_plain(
       paste(
-        "syntax error:", Method_name, "is not a method/attribute of the class", class_name,
-
-        # add call to error messages
-        if (!polars_options()$do_not_repeat_call) {
-          paste(
-            "\n when calling method:\n",
-            paste(capture.output(print(call)), collapse = "\n")
-          )
-        }
-      ),
-      domain = NA,
-      call. = FALSE
-    )
+        "$ - syntax error:", Method_name, "is not a method/attribute of the class", class_name
+      )
+    ) |> unwrap(call = call)
   }
   invisible(NULL)
 }
@@ -295,6 +312,14 @@ construct_DataTypeVector = function(l) {
   dtv
 }
 
+
+# completion symbols to method/property names.
+# Can be altered to "" at session time to support e.g. vscode autocomplete which will literally
+# evaluate these symbols and cause error and abort.
+completion_symbols = new.env(parent = emptyenv())
+completion_symbols$method = "()"
+completion_symbols$setter = "<-"
+
 #' Generate autocompletion suggestions for object
 #'
 #' @param env environment to extract usages from
@@ -324,11 +349,15 @@ get_method_usages = function(env, pattern = "") {
     }
   }
 
-  suggestions = sort(c(
-    found_names[facts$is_property],
-    paste0_len(found_names[facts$is_setter], "<-"),
-    paste0_len(found_names[facts$is_method], "()")
-  ))
+  if (length(facts$is_property) > 0) {
+    suggestions = sort(c(
+      found_names[facts$is_property],
+      paste0_len(found_names[facts$is_setter], completion_symbols$setter),
+      paste0_len(found_names[facts$is_method], completion_symbols$method)
+    ))
+  } else {
+    suggestions = NULL
+  }
 
   suggestions
 }
@@ -461,7 +490,7 @@ restruct_list = function(l) {
 #' # which only is for this demo.
 #' # instead sourced method like Expr_arr() at package build time instead
 #' # env = .pr$env$Expr #get env of the Expr Class
-#' # env$my_sub_ns = method_as_property(function() { #add a property/method
+#' # env$my_sub_ns = method_as_active_binding(function() { #add a property/method
 #' # my_class_sub_ns(self)
 #' # })
 #' # rm(env) #optional clean up
@@ -557,11 +586,6 @@ sub_name_space_accessor_function = function(self, name) {
   func
 }
 
-# as %in% but supports lists also
-"%in_list%" = \(lhs_element, rhs_list) rhs_list |>
-  sapply("==", lhs_element) |>
-  any()
-
 # takes a list of dtypes (for example from $schema), returns a named vector
 # indicating which are Structs
 dtypes_are_struct = function(dtypes) {
@@ -634,4 +658,42 @@ make_profile_plot = function(data, truncate_nodes) {
 # https://github.com/tidyverse/tibble/blob/e78ea46caea5e89cbffa5887c11050335ab23896/R/rownames.R#L116-L118
 raw_rownames = function(x) {
   .row_names_info(x, 0L) %||% .set_row_names(.row_names_info(x, 2L))
+}
+
+# from rstudioapi::isAvailable()
+is_rstudio = function() {
+  identical(.Platform$GUI, "RStudio")
+}
+
+
+# Adapted (or copied) functions from {rlang}
+`%||%` = function(x, y) {
+  if (is.null(x)) y else x
+}
+
+is_scalar_bool = function(x) {
+  length(x) == 1 && !is.na(x) && is.logical(x)
+}
+
+is_scalar_numeric = function(x) {
+  length(x) == 1 && !is.na(x) && is.numeric(x)
+}
+
+is_string = function(x) {
+  is.character(x) && length(x) == 1L && !is.na(x)
+}
+
+detect_void_name = function(x) {
+  x == "" | is.na(x)
+}
+
+is_named = function(x) {
+  nms = names(x)
+  if (is.null(nms)) {
+    return(FALSE)
+  }
+  if (any(detect_void_name(nms))) {
+    return(FALSE)
+  }
+  TRUE
 }

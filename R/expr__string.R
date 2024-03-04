@@ -215,25 +215,24 @@ ExprStr_len_chars = function() {
   .pr$Expr$str_len_chars(self)
 }
 
-#' Vertically concatenate values of a Series
+#' Vertically concatenate the string values in the column to a single string value.
 #'
-#' @description Vertically concatenate the values in the Series to a single
-#' string value.
 #' @param delimiter The delimiter to insert between consecutive string values.
-#' @param ignore_nulls Ignore null values. If `FALSE`, null values will be
+#' @param ... Ignored.
+#' @param ignore_nulls Ignore null values (default). If `FALSE`, null values will be
 #' propagated: if the column contains any null values, the output is null.
-#' @keywords ExprStr
 #' @return Expr of String concatenated
 #' @examples
 #' # concatenate a Series of strings to a single string
-#' df = pl$DataFrame(foo = c("1", NA, 2))
-#' df$select(pl$col("foo")$str$concat("-"))
-#' df$select(pl$col("foo")$str$concat("-", ignore_nulls = FALSE))
+#' df = pl$DataFrame(foo = c(1, NA, 2))
 #'
-#' # Series list of strings to Series of concatenated strings
-#' df = pl$DataFrame(list(bar = list(c("a", "b", "c"), c("1", "2", NA))))
-#' df$select(pl$col("bar")$list$eval(pl$col()$str$concat())$list$first())
-ExprStr_concat = function(delimiter = "-", ignore_nulls = TRUE) {
+#' df$select(pl$col("foo")$str$concat("-"))
+#'
+#' df$select(pl$col("foo")$str$concat("-", ignore_nulls = FALSE))
+ExprStr_concat = function(
+    delimiter = "",
+    ...,
+    ignore_nulls = TRUE) {
   .pr$Expr$str_concat(self, delimiter, ignore_nulls) |>
     unwrap("in $concat():")
 }
@@ -266,12 +265,12 @@ ExprStr_to_lowercase = function() {
 #' @keywords ExprStr
 #' @return Expr of String titlecase chars
 #' @details
-#' This method is only available with the "simd" feature.
-#' See [polars_info] for more details.
-#' @examplesIf polars_info()$features$simd
+#' This method is only available with the "nightly" feature.
+#' See [polars_info()] for more details.
+#' @examplesIf polars_info()$features$nightly
 #' pl$lit(c("hello there", "HI, THERE", NA))$str$to_titlecase()$to_series()
 ExprStr_to_titlecase = function() {
-  check_feature("simd", "in $to_titlecase():")
+  check_feature("nightly", "in $to_titlecase():")
 
   .pr$Expr$str_to_titlecase(self) |>
     unwrap("in $to_titlecase():")
@@ -360,7 +359,8 @@ ExprStr_strip_chars_end = function(matches = NULL) {
 #' @description Add zeroes to a string until it reaches `n` characters. If the
 #' number of characters is already greater than `n`, the string is not modified.
 #' @keywords ExprStr
-#' @param alignment Fill the value up to this length.
+#' @param alignment Fill the value up to this length. This can be an Expr or
+#' something coercible to an Expr. Strings are parsed as column names.
 #' @details
 #' Return a copy of the string left filled with ASCII '0' digits to make a string
 #' of length width.
@@ -584,7 +584,8 @@ ExprStr_encode = function(encoding) {
 #' Extract the target capture group from provided patterns
 #'
 #' @keywords ExprStr
-#' @param pattern A valid regex pattern
+#' @param pattern A valid regex pattern. Can be an Expr or something coercible
+#' to an Expr. Strings are parsed as column names.
 #' @param group_index Index of the targeted capture group. Group 0 means the whole
 #' pattern, first group begin at index 1 (default).
 #'
@@ -599,8 +600,8 @@ ExprStr_encode = function(encoding) {
 #'     "http://vote.com/ballon_dor?candidate=ronaldo&ref=polars"
 #'   )
 #' )
-#' df$select(
-#'   pl$col("a")$str$extract(r"(candidate=(\w+))", 1)
+#' df$with_columns(
+#'   extracted = pl$col("a")$str$extract(pl$lit(r"(candidate=(\w+))"), 1)
 #' )
 ExprStr_extract = function(pattern, group_index) {
   .pr$Expr$str_extract(self, pattern, group_index) |>

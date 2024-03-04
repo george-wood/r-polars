@@ -8,6 +8,7 @@ on:
     branches:
       - main
     paths:
+      - .github/actions/setup/action.yaml
       - .github/workflows/release.yaml
       - src/Makevars*
   workflow_dispatch:
@@ -31,7 +32,7 @@ jobs:
   build:
     runs-on: ${{ matrix.config.os }}
 
-    name: ${{ matrix.config.os }} (${{ matrix.config.r }}) - ${{ matrix.config.target }}
+    name: ${{ matrix.config.os }} (${{ matrix.config.r }})
 
     permissions:
       contents: write
@@ -40,9 +41,10 @@ jobs:
       fail-fast: false
       matrix:
         config:
-          - {os: macos-latest,   r: 'release'}
-          - {os: windows-latest, r: 'release'}
-          - {os: ubuntu-latest,   r: 'release'}
+          - { os: macos-12, r: "release" }
+          - { os: macos-14, r: "release" }
+          - { os: windows-latest, r: "release" }
+          - { os: ubuntu-latest, r: "release" }
 
     steps:
       - uses: actions/checkout@v4
@@ -95,8 +97,9 @@ jobs:
           mv ../polars* ./
 
       - name: Upload produced R packages
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
+          name: package-${{ matrix.config.os }}-${{ matrix.config.r }}
           path: |
             polars_*
             polars.zip

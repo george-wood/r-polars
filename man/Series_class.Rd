@@ -2,42 +2,180 @@
 % Please edit documentation in R/series__series.R
 \name{Series_class}
 \alias{Series_class}
+\alias{RPolarsSeries}
 \title{Inner workings of the Series-class}
 \description{
 The \code{Series}-class is simply two environments of respectively
-the public and private methods/function calls to the polars rust side. The instantiated
-\code{Series}-object is an \code{externalptr} to a lowlevel rust polars Series  object. The pointer address
-is the only statefullness of the Series object on the R side. Any other state resides on the
-rust side. The S3 method \code{.DollarNames.RPolarsSeries} exposes all public \verb{$foobar()}-methods which are callable onto the object.
-Most methods return another \code{Series}-class instance or similar which allows for method chaining.
-This class system in lack of a better name could be called "environment classes" and is the same class
-system extendr provides, except here there is both a public and private set of methods. For implementation
-reasons, the private methods are external and must be called from \code{.pr$Series$methodname()}, also
-all private methods must take any self as an argument, thus they are pure functions. Having the private methods
-as pure functions solved/simplified self-referential complications.
+the public and private methods/function calls to the polars rust side. The
+instantiated \code{Series}-object is an \code{externalptr} to a lowlevel rust polars
+Series  object. The pointer address is the only statefullness of the Series
+object on the R side. Any other state resides on the rust side. The S3
+method \code{.DollarNames.RPolarsSeries} exposes all public \verb{$foobar()}-methods
+which are callable onto the object. Most methods return another
+\code{Series}-class instance or similar which allows for method chaining. This
+class system in lack of a better name could be called "environment classes"
+and is the same class system extendr provides, except here there is both a
+public and private set of methods. For implementation reasons, the private
+methods are external and must be called from \code{.pr$Series$methodname()},
+also all private methods must take any self as an argument, thus they are
+pure functions. Having the private methods as pure functions
+solved/simplified self-referential complications.
 }
 \details{
-Check out the source code in R/Series_frame.R how public methods are derived from private methods.
-Check out  extendr-wrappers.R to see the extendr-auto-generated methods. These are moved to .pr and converted
-into pure external functions in after-wrappers.R. In zzz.R (named zzz to be last file sourced) the extendr-methods
-are removed and replaced by any function prefixed \code{Series_}.
+Check out the source code in R/Series_frame.R how public methods are
+derived from private methods. Check out  extendr-wrappers.R to see the
+extendr-auto-generated methods. These are moved to .pr and converted into
+pure external functions in after-wrappers.R. In zzz.R (named zzz to be last
+file sourced) the extendr-methods are removed and replaced by any function
+prefixed \code{Series_}.
 }
+\section{Active bindings}{
+
+\subsection{dtype}{
+
+\verb{$dtype} returns the \link[=pl_dtypes]{data type} of the Series.
+}
+
+\subsection{flags}{
+
+\verb{$flags} returns a named list with flag names and their values.
+
+Flags are used internally to avoid doing unnecessary computations, such as
+sorting a variable that we know is already sorted. The number of flags
+varies depending on the column type: columns of type \code{array} and \code{list}
+have the flags \code{SORTED_ASC}, \code{SORTED_DESC}, and \code{FAST_EXPLODE}, while other
+column types only have the former two.
+\itemize{
+\item \code{SORTED_ASC} is set to \code{TRUE} when we sort a column in increasing order, so
+that we can use this information later on to avoid re-sorting it.
+\item \code{SORTED_DESC} is similar but applies to sort in decreasing order.
+}
+}
+
+\subsection{name}{
+
+\verb{$name} returns the name of the Series.
+}
+
+\subsection{shape}{
+
+\verb{$shape} returns a numeric vector of length two with the number of length
+of the Series and width of the Series (always 1).
+}
+}
+
+\section{Expression methods}{
+
+
+Series stores most of all \link[=Expr_class]{Expr} methods.
+
+Some of these are stored in sub-namespaces.
+\subsection{arr}{
+
+\verb{$arr} stores all array related methods.
+}
+
+\subsection{bin}{
+
+\verb{$bin} stores all binary related methods.
+}
+
+\subsection{cat}{
+
+\verb{$cat} stores all categorical related methods.
+}
+
+\subsection{dt}{
+
+\verb{$dt} stores all temporal related methods.
+}
+
+\subsection{list}{
+
+\verb{$list} stores all list related methods.
+}
+
+\subsection{str}{
+
+\verb{$str} stores all string related methods.
+}
+
+\subsection{struct}{
+
+\verb{$struct} stores all struct related methods.
+}
+}
+
+\section{Conversion to R data types considerations}{
+
+When converting Polars objects, such as \link[=DataFrame_class]{DataFrames}
+to R objects, for example via the \code{\link[=as.data.frame.RPolarsDataFrame]{as.data.frame()}} generic function,
+each type in the Polars object is converted to an R type.
+In some cases, an error may occur because the conversion is not appropriate.
+In particular, there is a high possibility of an error when converting
+a \link[=DataType_Datetime]{Datetime} type without a time zone.
+A \link[=DataType_Datetime]{Datetime} type without a time zone in Polars is converted
+to the \link{POSIXct} type in R, which takes into account the time zone in which
+the R session is running (which can be checked with the \code{\link[=Sys.timezone]{Sys.timezone()}}
+function). In this case, if ambiguous times are included, a conversion error
+will occur. In such cases, change the session time zone using
+\code{\link[base:Sys.setenv]{Sys.setenv(TZ = "UTC")}} and then perform the conversion, or use the
+\code{\link[=ExprDT_replace_time_zone]{$dt$replace_time_zone()}} method on the Datetime type column to
+explicitly specify the time zone before conversion.
+
+\if{html}{\out{<div class="sourceCode r">}}\preformatted{# Due to daylight savings, clocks were turned forward 1 hour on Sunday, March 8, 2020, 2:00:00 am
+# so this particular date-time doesn't exist
+non_existent_time = pl$Series("2020-03-08 02:00:00")$str$strptime(pl$Datetime(), "\%F \%T")
+
+withr::with_envvar(
+  new = c(TZ = "America/New_York"),
+  \{
+    tryCatch(
+      # This causes an error due to the time zone (the `TZ` env var is affected).
+      as.vector(non_existent_time),
+      error = function(e) e
+    )
+  \}
+)
+#> <error: in to_r: ComputeError(ErrString("datetime '2020-03-08 02:00:00' is non-existent in time zone 'America/New_York'. Non-existent datetimes are not yet supported")) When calling: devtools::document()>
+
+withr::with_envvar(
+  new = c(TZ = "America/New_York"),
+  \{
+    # This is safe.
+    as.vector(non_existent_time$dt$replace_time_zone("UTC"))
+  \}
+)
+#> [1] "2020-03-08 02:00:00 UTC"
+}\if{html}{\out{</div>}}
+}
+
 \examples{
-pl$show_all_public_methods("RPolarsSeries")
+# make a Series
+s = pl$Series(c(1:3, 1L))
 
-# see all private methods (not intended for regular use)
-ls(.pr$Series)
-
-# make an object
-s = pl$Series(1:3)
-
-# use a public method/property
+# call an active binding
 s$shape
 
+# show flags
+s$sort()$flags
 
-# use a private method (mutable append not allowed in public api)
-s_copy = s
-.pr$Series$append_mut(s, pl$Series(5:1))
-identical(s_copy$to_r(), s$to_r()) # s_copy was modified when s was modified
+# use Expr method
+s$cos()
+
+# use Expr method in subnamespaces
+pl$Series(list(3:1, 1:2, NULL))$list$first()
+pl$Series(c(1, NA, 2))$str$concat("-")
+
+s = pl$date_range(
+  as.Date("2024-02-18"), as.Date("2024-02-24"),
+  interval = "1d"
+)$to_series()
+s
+s$dt$day()
+
+# show all available methods for Series
+pl$show_all_public_methods("RPolarsSeries")
+
 }
 \keyword{Series}

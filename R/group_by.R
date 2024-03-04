@@ -1,18 +1,40 @@
-#' @title Operations on Polars grouped DataFrame
-#' @return not applicable
-#' @details The GroupBy class in R, is just another interface on top of the DataFrame(R wrapper class) in
-#' rust polars. Groupby does not use the rust api for groupby+agg because the groupby-struct is a
-#' reference to a DataFrame and that reference will share lifetime with its parent DataFrame. There
-#' is no way to expose lifetime limited objects via extendr currently (might be quirky anyhow with R
-#'  GC). Instead the inputs for the groupby are just stored on R side, until also agg is called.
+#' Operations on Polars grouped DataFrame
+#'
+#' The GroupBy class in R, is just another interface on top of the
+#' [DataFrame][DataFrame_class] in rust polars.
+#' Groupby does not use the rust api for
+#' [`<DataFrame>$group_by()`][DataFrame_group_by] + [`$agg()`][GroupBy_agg]
+#' because the groupby-struct is a reference to a DataFrame and that reference
+#' will share lifetime with its parent DataFrame.
+#'
+#' There is no way to expose lifetime limited objects via extendr currently
+#' (might be quirky anyhow with R GC).
+#' Instead the inputs for the `group_by` are just stored on R side, until also `agg` is called.
 #' Which will end up in a self-owned DataFrame object and all is fine. groupby aggs are performed
 #' via the rust polars LazyGroupBy methods, see DataFrame.groupby_agg method.
 #'
+#' @section Active bindings:
+#'
+#' ## columns
+#'
+#' `$columns` returns a character vector with the column names.
+#'
 #' @name GroupBy_class
+#' @aliases RPolarsGroupBy
+#' @examples
+#' as_polars_df(mtcars)$group_by("cyl")$agg(
+#'   pl$col("mpg")$sum()
+#' )
 NULL
 
 
 RPolarsGroupBy = new.env(parent = emptyenv())
+
+
+# Active bindings
+
+GroupBy_columns = method_as_active_binding(\() self$ungroup()$columns)
+
 
 #' @export
 `$.RPolarsGroupBy` = function(self, name) {
@@ -27,7 +49,7 @@ RPolarsGroupBy = new.env(parent = emptyenv())
 #' @export
 #' @noRd
 .DollarNames.RPolarsGroupBy = function(x, pattern = "") {
-  paste0(ls(RPolarsGroupBy, pattern = pattern), "()")
+  paste0(ls(RPolarsGroupBy, pattern = pattern), completion_symbols$method)
 }
 
 #' The internal GroupBy constructor
@@ -43,7 +65,7 @@ construct_group_by = function(df, groupby_input, maintain_order) {
   out = c(" ")
   attr(out, "private") = list(
     dat = df$clone(),
-    groupby_input = unlist(groupby_input),
+    groupby_input = unpack_list(groupby_input),
     maintain_order = maintain_order
   )
   class(out) = "RPolarsGroupBy"
@@ -80,9 +102,7 @@ print.RPolarsGroupBy = function(x, ...) {
 #' pl$DataFrame(
 #'   foo = c("one", "two", "two", "one", "two"),
 #'   bar = c(5, 3, 2, 4, 1)
-#' )$
-#'   group_by("foo")$
-#'   agg(
+#' )$group_by("foo")$agg(
 #'   pl$col("bar")$sum()$name$suffix("_sum"),
 #'   pl$col("bar")$mean()$alias("bar_tail_sum")
 #' )

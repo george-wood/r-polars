@@ -2,34 +2,39 @@
 % Please edit documentation in R/functions__lazy.R
 \name{pl_count}
 \alias{pl_count}
-\title{pl$count}
+\title{Return the number of non-null values in the column.}
 \usage{
-pl_count(column = NULL)
+pl_count(...)
 }
 \arguments{
-\item{column}{if dtype is:
-\itemize{
-\item Series: count length of Series
-\item str: count values of this column
-\item NULL: count the number of value in this context.
-}}
+\item{...}{Characters indicating the column names, passed to \code{\link[=pl_col]{pl$col()}}.
+See \code{\link[=pl_col]{?pl_col}} for details.}
 }
 \value{
-Expr or value-count in case Series
+\link[=Expr_class]{Expression} of data type \link[=pl_dtypes]{UInt32}
 }
 \description{
-Count the number of values in this column/context.
+This function is syntactic sugar for \code{pl$col(...)$count()}.
+}
+\details{
+Calling this function without any arguments returns the number of rows in the context.
+This way of using the function is deprecated.
+Please use \code{\link[=pl_len]{pl$len()}} instead.
 }
 \examples{
-
 df = pl$DataFrame(
-  a = c(1, 8, 3),
-  b = c(4, 5, 2),
+  a = c(1, 2, NA),
+  b = c(3, NA, NA),
   c = c("foo", "bar", "foo")
 )
-df$select(pl$count())
 
+df$select(pl$count("a"))
 
-df$group_by("c", maintain_order = TRUE)$agg(pl$count())
+df$select(pl$count(c("b", "c")))
 }
-\keyword{Expr_new}
+\seealso{
+\itemize{
+\item \code{\link[=pl_len]{pl$len()}}
+\item \code{\link[=Expr_count]{<Expr>$count()}}
+}
+}

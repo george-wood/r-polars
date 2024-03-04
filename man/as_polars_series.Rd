@@ -5,11 +5,18 @@
 \alias{as_polars_series.default}
 \alias{as_polars_series.RPolarsSeries}
 \alias{as_polars_series.RPolarsExpr}
+\alias{as_polars_series.RPolarsThen}
+\alias{as_polars_series.RPolarsChainedThen}
 \alias{as_polars_series.POSIXlt}
 \alias{as_polars_series.data.frame}
 \alias{as_polars_series.vctrs_rcrd}
 \alias{as_polars_series.Array}
 \alias{as_polars_series.ChunkedArray}
+\alias{as_polars_series.nanoarrow_array}
+\alias{as_polars_series.nanoarrow_array_stream}
+\alias{as_polars_series.clock_time_point}
+\alias{as_polars_series.clock_sys_time}
+\alias{as_polars_series.clock_zoned_time}
 \title{To polars Series}
 \usage{
 as_polars_series(x, name = NULL, ...)
@@ -20,6 +27,10 @@ as_polars_series(x, name = NULL, ...)
 
 \method{as_polars_series}{RPolarsExpr}(x, name = NULL, ...)
 
+\method{as_polars_series}{RPolarsThen}(x, name = NULL, ...)
+
+\method{as_polars_series}{RPolarsChainedThen}(x, name = NULL, ...)
+
 \method{as_polars_series}{POSIXlt}(x, name = NULL, ...)
 
 \method{as_polars_series}{data.frame}(x, name = NULL, ...)
@@ -29,6 +40,16 @@ as_polars_series(x, name = NULL, ...)
 \method{as_polars_series}{Array}(x, name = NULL, ..., rechunk = TRUE)
 
 \method{as_polars_series}{ChunkedArray}(x, name = NULL, ..., rechunk = TRUE)
+
+\method{as_polars_series}{nanoarrow_array}(x, name = NULL, ...)
+
+\method{as_polars_series}{nanoarrow_array_stream}(x, name = NULL, ...)
+
+\method{as_polars_series}{clock_time_point}(x, name = NULL, ...)
+
+\method{as_polars_series}{clock_sys_time}(x, name = NULL, ...)
+
+\method{as_polars_series}{clock_zoned_time}(x, name = NULL, ...)
 }
 \arguments{
 \item{x}{Object to convert into a polars Series}

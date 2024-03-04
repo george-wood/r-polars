@@ -198,6 +198,26 @@ test_that("clone", {
   expect_identical(pl$mem_address(s2), pl$mem_address(s3))
 })
 
+test_that("cloning to avoid giving attributes to original data", {
+  df1 = pl$Series(1:10)
+
+  give_attr = function(data) {
+    attr(data, "created_on") = "2024-01-29"
+    data
+  }
+  df2 = give_attr(df1)
+  expect_identical(attributes(df1)$created_on, "2024-01-29")
+
+  give_attr2 = function(data) {
+    data = data$clone()
+    attr(data, "created_on") = "2024-01-29"
+    data
+  }
+  df1 = pl$Series(1:10)
+  df2 = give_attr2(df1)
+  expect_null(attributes(df1)$created_on)
+})
+
 test_that("dtype and equality", {
   expect_true(pl$Series(1:3)$dtype == pl$dtypes$Int32)
   expect_false(pl$Series(1:3)$dtype == pl$dtypes$Float64)
@@ -245,15 +265,27 @@ test_that("to_frame", {
   )
 })
 
-
-test_that("sorted flags, sort", {
+test_that("flags work", {
   s = pl$Series(c(2, 1, 3))
-  expect_true(s$sort(descending = FALSE)$flags$SORTED_ASC)
-  expect_true(s$sort(descending = TRUE)$flags$SORTED_DESC)
-  expect_false(any(unlist(pl$Series(1:4)$flags)))
+  expect_identical(
+    s$sort()$flags,
+    list(SORTED_ASC = TRUE, SORTED_DESC = FALSE)
+  )
+  expect_identical(
+    s$sort(descending = TRUE)$flags,
+    list(SORTED_ASC = FALSE, SORTED_DESC = TRUE)
+  )
 
+  s = pl$Series(list(1, 2, 3))
+  expect_identical(
+    s$flags,
+    list(SORTED_ASC = FALSE, SORTED_DESC = FALSE, FAST_EXPLODE = TRUE)
+  )
+})
 
-  # Compare performance with Expr
+test_that("sort on Series and Expr gives same results", {
+  s = pl$Series(c(2, 1, 3))
+
   l = list(a = c(6, 1, 0, NA, Inf, -Inf, NaN))
   s = pl$Series(l$a, "a")
   l_actual_expr_sort = pl$DataFrame(l)$select(
@@ -535,4 +567,13 @@ test_that("n_unique", {
   x = c(1:4, NA, NaN, 1) # 6 unique one repeated
   expect_identical(pl$Series(x)$n_unique(), 6)
   expect_identical(pl$Series(c())$n_unique(), 0)
+})
+
+
+test_that("method from Expr", {
+  expect_equal(pl$Series(1:3)$cos()$to_r(), cos(1:3))
+})
+
+test_that("cum_sum", {
+  expect_equal(pl$Series(c(1, 2, NA, 3))$cum_sum()$to_r(), c(1, 3, NA, 6))
 })

@@ -154,17 +154,25 @@ test_that("str$len_bytes str$len_chars", {
 
 test_that("str$concat", {
   # concatenate a Series of strings to a single string
-  df = pl$DataFrame(foo = c("1", "a", 2))
+  df = pl$DataFrame(foo = c("1", "a", NA))
   expect_identical(
-    df$select(pl$col("foo")$str$concat())$to_list(),
-    lapply(df$to_list(), paste, collapse = "-")
+    df$select(pl$col("foo")$str$concat())$to_list()[[1]],
+    "1a"
+  )
+  expect_identical(
+    df$select(pl$col("foo")$str$concat("-"))$to_list()[[1]],
+    "1-a"
+  )
+  expect_identical(
+    df$select(pl$col("foo")$str$concat(ignore_nulls = FALSE))$to_list()[[1]],
+    NA_character_
   )
 
   # Series list of strings to Series of concatenated strings
   df = pl$DataFrame(list(bar = list(c("a", "b", "c"), c("1", "2", "æ"))))
   expect_identical(
-    df$select(pl$col("bar")$list$eval(pl$col()$str$concat())$list$first())$to_list()$bar,
-    sapply(df$to_list()[[1]], paste, collapse = "-")
+    df$select(pl$col("bar")$list$eval(pl$element()$str$concat())$list$first())$to_list()$bar,
+    sapply(df$to_list()[[1]], paste, collapse = "")
   )
 })
 
@@ -184,8 +192,8 @@ test_that("to_uppercase, to_lowercase", {
   )
 })
 
-test_that("to_titlecase - enabled via the simd feature", {
-  skip_if_not(polars_info()$features$simd)
+test_that("to_titlecase - enabled via the nightly feature", {
+  skip_if_not(polars_info()$features$nightly)
   df2 = pl$DataFrame(foo = c("hi there", "HI, THERE", NA))
   expect_identical(
     df2$select(pl$col("foo")$str$to_titlecase())$to_list()$foo,
@@ -193,8 +201,8 @@ test_that("to_titlecase - enabled via the simd feature", {
   )
 })
 
-test_that("to_titlecase - enabled via the simd feature", {
-  skip_if(polars_info()$features$simd)
+test_that("to_titlecase - enabled via the nightly feature", {
+  skip_if(polars_info()$features$nightly)
   expect_error(pl$col("foo")$str$to_titlecase())
 })
 
@@ -249,18 +257,22 @@ test_that("zfill", {
   )
 
   # test wrong input type
-  expect_grepl_error(
-    expect_identical(
-      pl$lit(c(-1, 2, 10, "5"))$str$zfill("a")$to_r(),
-      "something"
-    ),
-    "i64"
+  expect_error(
+    pl$lit(c(-1, 2, 10, "5"))$str$zfill(pl$lit("a"))$to_r(),
+    "u64"
   )
 
   # test wrong input range
-  expect_grepl_error(
+  expect_error(
     pl$lit(c(-1, 2, 10, "5"))$str$zfill(-3)$to_r(),
-    "cannot be less than zero"
+    "conversion from"
+  )
+
+  # works with expr
+  df = pl$DataFrame(a = c(-1L, 123L, 999999L, NA), val = 4:7)
+  expect_identical(
+    df$select(zfill = pl$col("a")$cast(pl$String)$str$zfill("val"))$to_list(),
+    list(zfill = c("-001", "00123", "999999", NA))
   )
 })
 
@@ -338,16 +350,13 @@ test_that("str$contains", {
     )
   )
 
-  # TODO seem strict does not work, raised issue https://github.com/pola-rs/polars/issues/6901
-  # expect_grepl_error(
-  #   df$select(
-  #     pl$col("a")$str$contains(
-  #       "($INVALIDREGEX$", literal=FALSE, strict=FALSE
-  #     )$alias("literal")
-  #   )
-  # )
-
-  # )
+  # not strict
+  expect_identical(
+    df$select(
+      pl$col("a")$str$contains("($INVALIDREGEX$", literal = FALSE, strict = FALSE)
+    )$to_list(),
+    list(a = rep(NA, 4))
+  )
 })
 
 
@@ -437,16 +446,18 @@ test_that("str$extract", {
       "http://vote.com/ballon_dor?candidat=jorginho&ref=polars",
       "http://vote.com/ballon_dor?candidate=ronaldo&ref=polars"
     )
-  )$str$extract(r"(candidate=(\w+))", 1)$to_r()
+  )$str$extract(pl$lit(r"(candidate=(\w+))"), 1)$to_r()
   expect_identical(actual, c("messi", NA, "ronaldo"))
 
-  expect_grepl_error(
-    pl$lit("abc")$str$extract(42, 42),
-    "str"
+  # wrong input
+  expect_identical(
+    pl$lit("abc")$str$extract(42, 42)$to_r(),
+    NA_character_
   )
 
-  expect_true(
-    pl$lit("abc")$str$extract("a", "2")$meta$eq(pl$lit("abc")$str$extract("a", 2))
+  expect_identical(
+    pl$lit("abc")$str$extract(pl$lit("a"), "2")$to_r(),
+    pl$lit("abc")$str$extract(pl$lit("a"), 2)$to_r()
   )
 
   expect_grepl_error(
@@ -666,23 +677,23 @@ test_that("str$str_explode", {
 
 test_that("str$parse_int", {
   expect_identical(
-    pl$lit(c("110", "101", "010"))$str$parse_int(2)$shrink_dtype()$to_r(),
-    c(6L, 5L, 2L)
+    pl$lit(c("110", "101", "010"))$str$parse_int(2)$to_r(),
+    c(6, 5, 2)
   )
 
   expect_identical(
-    pl$lit(c("110", "101", "010"))$str$parse_int()$shrink_dtype()$to_r(),
-    c(6L, 5L, 2L)
+    pl$lit(c("110", "101", "010"))$str$parse_int()$to_r(),
+    c(6, 5, 2)
   )
 
   expect_identical(
-    pl$lit(c("110", "101", "010"))$str$parse_int(10)$shrink_dtype()$to_r(),
-    c(110L, 101L, 10L)
+    pl$lit(c("110", "101", "010"))$str$parse_int(10)$to_r(),
+    c(110, 101, 10)
   )
 
   expect_identical(
-    pl$lit(c("110", "101", "hej"))$str$parse_int(10, FALSE)$shrink_dtype()$to_r(),
-    c(110L, 101L, NA)
+    pl$lit(c("110", "101", "hej"))$str$parse_int(10, FALSE)$to_r(),
+    c(110, 101, NA)
   )
 
   expect_error(pl$lit("foo")$str$parse_int()$to_r(), "strict integer parsing failed for 1 value")

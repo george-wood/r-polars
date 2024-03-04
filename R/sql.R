@@ -1,30 +1,22 @@
-#' @title Run SQL queries against DataFrame/LazyFrame data.
-#' @description Run SQL queries against DataFrame/LazyFrame data.
-#' @details Currently, only available when built with the "sql" feature.
-#' See [polars_info] for more information.
+#' Run SQL queries against DataFrame/LazyFrame data.
+#'
+#' Run SQL queries against [DataFrame][DataFrame_class]/[LazyFrame][LazyFrame_class] data.
 #' @name SQLContext_class
-#' @keywords SQLContext
+#' @aliases RPolarsSQLContext
 #' @examplesIf polars_info()$features$sql
 #' lf = pl$LazyFrame(a = 1:3, b = c("x", NA, "z"))
+#'
 #' res = pl$SQLContext(frame = lf)$execute(
 #'   "SELECT b, a*2 AS two_a FROM frame WHERE b IS NOT NULL"
 #' )
 #' res$collect()
 NULL
 
-
-#' @title auto complete $-access into a polars object
-#' @description called by the interactive R session internally
-#' @param x RPolarsSQLContext
-#' @param pattern code-stump as string to auto-complete
-#' @return char vec
 #' @export
 #' @noRd
-#' @inherit .DollarNames.RPolarsDataFrame return
 .DollarNames.RPolarsSQLContext = function(x, pattern = "") {
   get_method_usages(RPolarsSQLContext, pattern = pattern)
 }
-
 
 #' @noRd
 #' @export

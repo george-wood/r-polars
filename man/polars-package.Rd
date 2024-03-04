@@ -11,7 +11,9 @@ Lightning-fast 'DataFrame' library written in 'Rust'. Convert R data to 'Polars'
 \seealso{
 Useful links:
 \itemize{
-  \item \url{https://github.com/pola-rs/r-polars https://rpolars.r-universe.dev/polars}
+  \item \url{https://rpolars.github.io/}
+  \item \url{https://github.com/pola-rs/r-polars}
+  \item \url{https://rpolars.r-universe.dev/polars}
 }
 
 }
@@ -22,7 +24,7 @@ Authors:
 \itemize{
   \item Ritchie Vink \email{ritchie46@gmail.com}
   \item Tatsuya Shima \email{ts1s1andn@gmail.com}
-  \item Etienne Bacher \email{etienne.bacher@protonmail.com}
+  \item Etienne Bacher \email{etienne.bacher@protonmail.com} (\href{https://orcid.org/0000-0002-9271-5075}{ORCID})
 }
 
 }

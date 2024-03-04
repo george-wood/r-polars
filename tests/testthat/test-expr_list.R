@@ -44,7 +44,7 @@ test_that("list$sum max min mean", {
     c(-Inf)
   )
 
-  df = pl$DataFrame(list(x = ints))
+  df = pl$DataFrame(x = ints)
   p_res = df$select(
     pl$col("x")$list$sum()$alias("sum"),
     pl$col("x")$list$max()$alias("max"),
@@ -63,7 +63,7 @@ test_that("list$sum max min mean", {
     r_res
   )
 
-  df = pl$DataFrame(list(x = floats))
+  df = pl$DataFrame(x = floats)
   p_res = df$select(
     pl$col("x")$list$sum()$alias("sum"),
     pl$col("x")$list$max()$alias("max"),
@@ -97,9 +97,7 @@ test_that("list$reverse", {
 })
 
 
-
-
-test_that("list$unique arr$sort", {
+test_that("list$unique list$sort", {
   l = list(
     l_i32 = list(c(1:2, 1:2), c(NA_integer_, NA_integer_, 3L, 1:2)),
     l_f64 = list(c(1, 1, 2, 3, NA, Inf, NA, Inf), c(1)),
@@ -115,6 +113,18 @@ test_that("list$unique arr$sort", {
   p_res = df$select(pl$all()$list$unique()$list$sort(descending = TRUE))$to_list()
   r_res = lapply(l, lapply, \(x)  sort(unique(x), na.last = FALSE, decr = TRUE))
   expect_equal(p_res, r_res)
+})
+
+test_that("list$n_unique", {
+  df = pl$DataFrame(
+    l_i32 = list(c(1:2, 1:2), c(NA_integer_, NA_integer_, 3L, 1:2)),
+    l_f64 = list(c(1, 1, 2, 3, NA, Inf, NA, Inf), c(1)),
+    l_char = list(c(letters, letters), c("a", "a", "b"))
+  )
+  expect_equal(
+    df$select(pl$all()$list$n_unique())$to_list(),
+    list(l_i32 = c(2, 4), l_f64 = c(5, 1), l_char = c(26, 2))
+  )
 })
 
 
@@ -152,6 +162,42 @@ test_that("gather", {
   expect_error(
     pl$lit(l)$list$gather(list(c(0:3), 0L, 0L))$to_r(),
     "gather indices are out of bounds"
+  )
+})
+
+test_that("gather_every", {
+  df = pl$DataFrame(
+    a = list(1:5, 6:8, 9:12),
+    n = c(2, 1, 3),
+    offset = c(0, 1, 0)
+  )
+
+  expect_identical(
+    df$select(
+      out = pl$col("a")$list$gather_every("n", offset = pl$col("offset"))
+    )$to_list(),
+    list(out = list(c(1L, 3L, 5L), c(7L, 8L), c(9L, 12L)))
+  )
+
+  # wrong n
+  expect_error(
+    df$select(
+      out = pl$col("a")$list$gather_every(-1)
+    )
+  )
+
+  # missing n
+  expect_error(
+    df$select(
+      out = pl$col("a")$list$gather_every()
+    )
+  )
+
+  # wrong offset
+  expect_error(
+    df$select(
+      out = pl$col("a")$list$gather_every(n = 2, offset = -1)
+    )
   )
 })
 
@@ -205,12 +251,17 @@ test_that("join", {
   expect_identical(l_act, l_exp)
 
   df = pl$DataFrame(
-    s = list(c("a", "b", "c"), c("x", "y")),
-    separator = c("*", "_")
+    s = list(c("a", "b", "c"), c("x", "y"), c("foo", NA, "bar")),
+    separator = c("*", "_", "*")
   )
   expect_identical(
     df$select(pl$col("s")$list$join(pl$col("separator")))$to_list(),
-    list(s = c("a*b*c", "x_y"))
+    list(s = c("a*b*c", "x_y", NA))
+  )
+  # ignore_nulls
+  expect_identical(
+    df$select(pl$col("s")$list$join(pl$col("separator"), ignore_nulls = TRUE))$to_list(),
+    list(s = c("a*b*c", "x_y", "foo*bar"))
   )
 })
 
@@ -244,58 +295,69 @@ test_that("arg_min arg_max", {
 
 
 test_that("diff", {
-  skip_if_not_installed("data.table")
   l = list(
     l_i32 = list(1:5, 1:3, c(4L, 2L, 1L, 7L, 42L)),
     l_f64 = list(c(1, 1, 2, 3, NA, Inf, NA, Inf), c(1), numeric())
   )
   df = pl$DataFrame(l)
 
-  r_diff = function(x, n = 1L) {
-    x - data.table::shift(x, n)
-  }
-
   l_act_diff_1 = df$select(pl$all()$list$diff())$to_list()
-  l_exp_diff_1 = lapply(l, sapply, r_diff)
+  l_exp_diff_1 = list(
+    l_i32 = list(c(NA, rep(1L, 4)), c(NA, 1L, 1L), c(NA, -2L, -1L, 6L, 35L)),
+    l_f64 = list(c(NA, 0, 1, 1, NA, NA, NA, NA), NA_real_, numeric())
+  )
   expect_identical(l_act_diff_1, l_exp_diff_1)
 
   l_act_diff_2 = df$select(pl$all()$list$diff(n = 2))$to_list()
-  l_exp_diff_2 = lapply(l, sapply, r_diff, n = 2)
+  l_exp_diff_2 = list(
+    l_i32 = list(c(NA, NA, rep(2L, 3)), c(NA, NA, 2L), c(NA, NA, -3L, 5L, 41L)),
+    l_f64 = list(c(NA, NA, 1, 2, NA, Inf, NA, NaN), NA_real_, numeric())
+  )
   expect_identical(l_act_diff_2, l_exp_diff_2)
 
   l_act_diff_0 = df$select(pl$all()$list$diff(n = 0))$to_list()
-  l_exp_diff_0 = lapply(l, sapply, r_diff, n = 0)
+  l_exp_diff_0 = list(
+    l_i32 = list(rep(0L, 5), rep(0L, 3), rep(0L, 5)),
+    l_f64 = list(c(rep(0, 4), NA, NaN, NA, NaN), 0, numeric())
+  )
   expect_identical(l_act_diff_0, l_exp_diff_0)
 })
 
 
 
 test_that("shift", {
-  skip_if_not_installed("data.table")
   l = list(
     l_i32 = list(1:5, 1:3, c(4L, 2L, 1L, 7L, 42L)),
     l_f64 = list(c(1, 1, 2, 3, NA, Inf, NA, Inf), c(1), numeric())
   )
   df = pl$DataFrame(l)
 
-  r_shift = function(x, n = 1L) {
-    data.table::shift(x, n) # <3 data.table
-  }
-
   l_act_diff_1 = df$select(pl$all()$list$shift())$to_list()
-  l_exp_diff_1 = lapply(l, sapply, r_shift)
+  l_exp_diff_1 = list(
+    l_i32 = list(c(NA, 1L:4L), c(NA, 1L, 2L), c(NA, 4L, 2L, 1L, 7L)),
+    l_f64 = list(c(NA, 1, 1, 2, 3, NA, Inf, NA), NA_real_, numeric())
+  )
   expect_identical(l_act_diff_1, l_exp_diff_1)
 
   l_act_diff_2 = df$select(pl$all()$list$shift(2))$to_list()
-  l_exp_diff_2 = lapply(l, sapply, r_shift, 2)
+  l_exp_diff_2 = list(
+    l_i32 = list(c(NA, NA, 1L:3L), c(NA, NA, 1L), c(NA, NA, 4L, 2L, 1L)),
+    l_f64 = list(c(NA, NA, 1, 1, 2, 3, NA, Inf), NA_real_, numeric())
+  )
   expect_identical(l_act_diff_2, l_exp_diff_2)
 
   l_act_diff_0 = df$select(pl$all()$list$shift(0))$to_list()
-  l_exp_diff_0 = lapply(l, sapply, r_shift, 0)
+  l_exp_diff_0 = list(
+    l_i32 = list(1L:5L, 1L:3L, c(4L, 2L, 1L, 7L, 42L)),
+    l_f64 = list(c(1, 1, 2, 3, NA, Inf, NA, Inf), 1, numeric())
+  )
   expect_identical(l_act_diff_0, l_exp_diff_0)
 
   l_act_diff_m1 = df$select(pl$all()$list$shift(-1))$to_list()
-  l_exp_diff_m1 = lapply(l, sapply, r_shift, -1)
+  l_exp_diff_m1 = list(
+    l_i32 = list(c(2L:5L, NA), c(2L, 3L, NA), c(2L, 1L, 7L, 42L, NA)),
+    l_f64 = list(c(1, 2, 3, NA, Inf, NA, Inf, NA), NA_real_, numeric())
+  )
   expect_identical(l_act_diff_m1, l_exp_diff_m1)
 })
 
@@ -372,6 +434,20 @@ test_that("contains", {
   expect_identical(l_act, l_exp)
 })
 
+test_that("contains with categorical", {
+  df = pl$DataFrame(
+    a = list(factor(c("a", "b")), factor(c("c", "d"))),
+    item = c("a", "a")
+  )
+  expect_identical(
+    df$select(
+      with_expr = pl$col("a")$list$contains(pl$col("item")),
+      with_lit = pl$col("a")$list$contains("e")
+    )$to_list(),
+    list(with_expr = c(TRUE, FALSE), with_lit = c(FALSE, FALSE))
+  )
+})
+
 
 test_that("concat", {
   df = pl$DataFrame(
@@ -399,7 +475,7 @@ test_that("concat", {
 
 test_that("to_struct", {
   l = list(integer(), 1:2, 1:3, 1:2)
-  df = pl$DataFrame(list(a = l))
+  df = pl$DataFrame(a = l)
   act_1 = df$select(pl$col("a")$list$to_struct(
     n_field_strategy = "first_non_null",
     fields = \(idx) paste0("hello_you_", idx)
@@ -433,7 +509,7 @@ test_that("to_struct", {
 
 
 test_that("eval", {
-  df = pl$DataFrame(a = list(a = c(1, 8, 3), b = c(4, 5, 2)))
+  df = pl$DataFrame(a = c(1, 8, 3), b = c(4, 5, 2))
   l_act = df$with_columns(
     pl$concat_list(list("a", "b"))$list$eval(pl$element()$rank())$alias("rank")
   )$to_list()
@@ -449,7 +525,7 @@ test_that("eval", {
 
 test_that("$list$all() works", {
   df = pl$DataFrame(
-    list(a = list(c(TRUE, TRUE), c(FALSE, TRUE), c(FALSE, FALSE), NA, c()))
+    a = list(c(TRUE, TRUE), c(FALSE, TRUE), c(FALSE, FALSE), NA, c())
   )
   expect_identical(
     df$select(all = pl$col("a")$list$all())$to_list(),
@@ -459,7 +535,7 @@ test_that("$list$all() works", {
 
 test_that("$list$any() works", {
   df = pl$DataFrame(
-    list(a = list(c(TRUE, TRUE), c(FALSE, TRUE), c(FALSE, FALSE), NA, c()))
+    a = list(c(TRUE, TRUE), c(FALSE, TRUE), c(FALSE, FALSE), NA, c())
   )
   expect_identical(
     df$select(any = pl$col("a")$list$any())$to_list(),
@@ -516,24 +592,25 @@ test_that("$list$set_*() work with strings", {
   )
 })
 
-# TODO: currently (rs-0.36.2), this panicks, which leads to other tests failing
-# due to panicks
-# Uncomment when resolved upstream: https://github.com/pola-rs/polars/issues/13840
-# test_that("$list$set_*() errors if no common supertype", {
-#   df = pl$DataFrame(
-#     a = list(c(1, 2, 3), NA_real_, c(NA_real_, 3), c(5, 6, 7)),
-#     b = list(2:4, 3L, c(3L, 4L, NA_integer_), c(6L, 8L))
-#   )
-#   expect_error(
-#     df$select(pl$col("a")$list$set_union("b"))
-#   )
-#   expect_error(
-#     df$select(pl$col("a")$list$set_intersection("b"))
-#   )
-#   expect_error(
-#     df$select(pl$col("a")$list$set_difference("b"))
-#   )
-#   expect_error(
-#     df$select(pl$col("a")$list$set_symmetric_difference("b"))
-#   )
-# })
+test_that("$list$set_*() casts to common supertype", {
+  df = pl$DataFrame(
+    a = list(c(1, 2), NA_real_),
+    b = list(c("a", "b"), NA_character_)
+  )
+  expect_identical(
+    df$select(pl$col("a")$list$set_union("b"))$to_list(),
+    list(a = list(c("1.0", "2.0", "a", "b"), NA_character_))
+  )
+  expect_identical(
+    df$select(pl$col("a")$list$set_intersection("b"))$to_list(),
+    list(a = list(character(0), NA_character_))
+  )
+  expect_identical(
+    df$select(pl$col("a")$list$set_difference("b"))$to_list(),
+    list(a = list(c("1.0", "2.0"), character(0)))
+  )
+  expect_identical(
+    df$select(pl$col("a")$list$set_symmetric_difference("b"))$to_list(),
+    list(a = list(c("1.0", "2.0", "a", "b"), character(0)))
+  )
+})

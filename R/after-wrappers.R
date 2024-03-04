@@ -5,7 +5,7 @@
 ## 2. ADD INTERNAL PROFILER, options(polars.debug_polars = TRUE)
 ## 3. ADD build_debug_print TO DEBUG CLASS CONSTRUCTION DURING PACKAGE BUILDTIME (rarely used)
 ## 4. ADD BETTER METHOD LOOKUP ERR MSGS macro_add_syntax_check_to_class(), HELPS END USER
-## 5. ADD OPTION TO FLAG A METHOD TO BEHAVE LIKE A PROPERTY method_as_property()
+## 5. ADD OPTION TO FLAG A METHOD TO BEHAVE LIKE A PROPERTY method_as_active_binding()
 
 
 #' A dummy function to mark a function to replace extendr-wrapper function
@@ -69,7 +69,6 @@ extendr_method_to_pure_functions = function(env, class_name = NULL) {
 }
 
 
-#' @include extendr-wrappers.R
 #' @title polars-API: private calls to rust-polars
 #' @description `.pr`
 #' Original extendr bindings converted into pure functions
@@ -124,7 +123,6 @@ extendr_method_to_pure_functions = function(env, class_name = NULL) {
 ##### -----  MACROS used at package build time
 
 #' @title add syntax verification to a class
-#' @include utils.R
 #' @param Class_name string name of env class
 #' @rdname macro_add_syntax_check_to
 #' @noRd
@@ -144,10 +142,11 @@ extendr_method_to_pure_functions = function(env, class_name = NULL) {
 macro_add_syntax_check_to_class = function(Class_name) {
   tokens = paste0(
     "`$.", Class_name, "` <- function (self, name) {\n",
-    "  verify_method_call(", Class_name, ",name)\n",
+    "  verify_not_null_pointer(self, 'in `$.", Class_name, "`')\n",
+    "  verify_method_call(", Class_name, ", name)\n",
     "  func <- ", Class_name, "[[name]]\n",
     "  environment(func) <- environment()\n",
-    "  if(inherits(func,'property')) {\n",
+    "  if(inherits(func, 'property')) {\n",
     "    func()\n",
     "  } else {\n",
     "   func\n",
@@ -162,13 +161,14 @@ macro_add_syntax_check_to_class = function(Class_name) {
 ## modify classes to perform syntax checking
 ## this relies on no envrionment other than env_classes has been defined when macro called
 ## this mod should be run immediately after extendr-wrappers.R are sourced
-is_env_class = sapply(mget(ls()), \(x) typeof(x) == "environment")
+non_class_envs = c("completion_symbols")
+is_env_class = sapply(ls(), \(x) typeof(get(x)) == "environment" && !x %in% non_class_envs)
 env_class_names = names(is_env_class)[is_env_class]
 if (build_debug_print) cat("\nadd syntax check to: ")
 for (i_class in env_class_names) {
   if (build_debug_print) cat(i_class, ", ", sep = "")
   if (!exists(paste0("$.", i_class))) {
-    stop("internal assertion failed, env class without a dollarsign method")
+    stop("internal assertion failed, env class without a dollarsign method for ", i_class)
   }
   macro_add_syntax_check_to_class(i_class)
 }
@@ -181,7 +181,7 @@ if (build_debug_print) cat("\n")
 #' @param f a function
 #' @param setter bool, if true a property method can be modified by user
 #' @return function subclassed into c("property","function") or c("setter","property","function")
-method_as_property = function(f, setter = FALSE) {
+method_as_active_binding = function(f, setter = FALSE) {
   class(f) = if (setter) {
     c("setter", "property", "function")
   } else {
@@ -270,6 +270,10 @@ pl_show_all_public_methods = function(class_names = NULL) {
   self[[name]]
 }
 
+.DollarNames.pl_polars_env = function(x, pattern = "") {
+  ls(x, pattern = pattern)
+}
+
 
 
 # remap
@@ -326,8 +330,6 @@ pl_mem_address = function(robj) {
 #'  - Code completion is facilitated by `.DollarNames.ClassName`-s3method see e.g. 'R/dataframe__frame.R'
 #'  - Implementation of property-methods as DataFrame_columns() and syntax checking is an extension to `$.ClassName`
 #'  See function macro_add_syntax_check_to_class().
-#'
-#' @importFrom utils .DollarNames
 #' @return not applicable
 #' @examples
 #' # all a polars object is only made of:

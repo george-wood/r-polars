@@ -1,54 +1,239 @@
-#' @title Inner workings of the Series-class
+#' Inner workings of the Series-class
+#'
+#' The `Series`-class is simply two environments of respectively
+#' the public and private methods/function calls to the polars rust side. The
+#' instantiated `Series`-object is an `externalptr` to a lowlevel rust polars
+#' Series  object. The pointer address is the only statefullness of the Series
+#' object on the R side. Any other state resides on the rust side. The S3
+#' method `.DollarNames.RPolarsSeries` exposes all public `$foobar()`-methods
+#' which are callable onto the object. Most methods return another
+#' `Series`-class instance or similar which allows for method chaining. This
+#' class system in lack of a better name could be called "environment classes"
+#' and is the same class system extendr provides, except here there is both a
+#' public and private set of methods. For implementation reasons, the private
+#' methods are external and must be called from `.pr$Series$methodname()`,
+#' also all private methods must take any self as an argument, thus they are
+#' pure functions. Having the private methods as pure functions
+#' solved/simplified self-referential complications.
+#'
+#' Check out the source code in R/Series_frame.R how public methods are
+#' derived from private methods. Check out  extendr-wrappers.R to see the
+#' extendr-auto-generated methods. These are moved to .pr and converted into
+#' pure external functions in after-wrappers.R. In zzz.R (named zzz to be last
+#' file sourced) the extendr-methods are removed and replaced by any function
+#' prefixed `Series_`.
 #'
 #' @name Series_class
-#' @description The `Series`-class is simply two environments of respectively
-#' the public and private methods/function calls to the polars rust side. The instantiated
-#' `Series`-object is an `externalptr` to a lowlevel rust polars Series  object. The pointer address
-#' is the only statefullness of the Series object on the R side. Any other state resides on the
-#' rust side. The S3 method `.DollarNames.RPolarsSeries` exposes all public `$foobar()`-methods which are callable onto the object.
-#' Most methods return another `Series`-class instance or similar which allows for method chaining.
-#' This class system in lack of a better name could be called "environment classes" and is the same class
-#' system extendr provides, except here there is both a public and private set of methods. For implementation
-#' reasons, the private methods are external and must be called from `.pr$Series$methodname()`, also
-#' all private methods must take any self as an argument, thus they are pure functions. Having the private methods
-#' as pure functions solved/simplified self-referential complications.
+#' @aliases RPolarsSeries
+#' @section Active bindings:
 #'
-#' @details Check out the source code in R/Series_frame.R how public methods are derived from private methods.
-#' Check out  extendr-wrappers.R to see the extendr-auto-generated methods. These are moved to .pr and converted
-#' into pure external functions in after-wrappers.R. In zzz.R (named zzz to be last file sourced) the extendr-methods
-#' are removed and replaced by any function prefixed `Series_`.
+#' ## dtype
 #'
+#' `$dtype` returns the [data type][pl_dtypes] of the Series.
+#'
+#' ## flags
+#'
+#' `$flags` returns a named list with flag names and their values.
+#'
+#' Flags are used internally to avoid doing unnecessary computations, such as
+#' sorting a variable that we know is already sorted. The number of flags
+#' varies depending on the column type: columns of type `array` and `list`
+#' have the flags `SORTED_ASC`, `SORTED_DESC`, and `FAST_EXPLODE`, while other
+#' column types only have the former two.
+#'
+#' - `SORTED_ASC` is set to `TRUE` when we sort a column in increasing order, so
+#'   that we can use this information later on to avoid re-sorting it.
+#' - `SORTED_DESC` is similar but applies to sort in decreasing order.
+#'
+#' ## name
+#'
+#' `$name` returns the name of the Series.
+#'
+#' ## shape
+#'
+#' `$shape` returns a numeric vector of length two with the number of length
+#' of the Series and width of the Series (always 1).
+#'
+#' @section Expression methods:
+#'
+#' Series stores most of all [Expr][Expr_class] methods.
+#'
+#' Some of these are stored in sub-namespaces.
+#'
+#' ## arr
+#'
+#' `$arr` stores all array related methods.
+#'
+#' ## bin
+#'
+#' `$bin` stores all binary related methods.
+#'
+#' ## cat
+#'
+#' `$cat` stores all categorical related methods.
+#'
+#' ## dt
+#'
+#' `$dt` stores all temporal related methods.
+#'
+#' ## list
+#'
+#' `$list` stores all list related methods.
+#'
+#' ## str
+#'
+#' `$str` stores all string related methods.
+#'
+#' ## struct
+#'
+#' `$struct` stores all struct related methods.
+#'
+#' @inheritSection DataFrame_class Conversion to R data types considerations
 #' @keywords Series
+#'
 #' @examples
-#' pl$show_all_public_methods("RPolarsSeries")
+#' # make a Series
+#' s = pl$Series(c(1:3, 1L))
 #'
-#' # see all private methods (not intended for regular use)
-#' ls(.pr$Series)
-#'
-#' # make an object
-#' s = pl$Series(1:3)
-#'
-#' # use a public method/property
+#' # call an active binding
 #' s$shape
 #'
+#' # show flags
+#' s$sort()$flags
 #'
-#' # use a private method (mutable append not allowed in public api)
-#' s_copy = s
-#' .pr$Series$append_mut(s, pl$Series(5:1))
-#' identical(s_copy$to_r(), s$to_r()) # s_copy was modified when s was modified
+#' # use Expr method
+#' s$cos()
+#'
+#' # use Expr method in subnamespaces
+#' pl$Series(list(3:1, 1:2, NULL))$list$first()
+#' pl$Series(c(1, NA, 2))$str$concat("-")
+#'
+#' s = pl$date_range(
+#'   as.Date("2024-02-18"), as.Date("2024-02-24"),
+#'   interval = "1d"
+#' )$to_series()
+#' s
+#' s$dt$day()
+#'
+#' # show all available methods for Series
+#' pl$show_all_public_methods("RPolarsSeries")
+#'
 NULL
 
 
+# Active bindings
+
+Series_dtype = method_as_active_binding(\() .pr$Series$dtype(self))
 
 
-#' Wrap as Series
+Series_flags = method_as_active_binding(
+  \() {
+    out = list(
+      "SORTED_ASC" = .pr$Series$is_sorted_flag(self),
+      "SORTED_DESC" = .pr$Series$is_sorted_reverse_flag(self)
+    )
+
+    # the width value given here doesn't matter, but pl$Array() must have one
+    if (pl$same_outer_dt(self$dtype, pl$List()) ||
+      pl$same_outer_dt(self$dtype, pl$Array(width = 1))) {
+      out[["FAST_EXPLODE"]] = .pr$Series$fast_explode_flag(self)
+    }
+
+    out
+  }
+)
+
+
+Series_name = method_as_active_binding(\() .pr$Series$name(self))
+
+
+Series_shape = method_as_active_binding(\() .pr$Series$shape(self))
+
+
+## Methods from Expr
+
+#' Function to add Expr methods to Series
+#'
+#' Executed in zzz.R
 #' @noRd
-#' @description input is either already a Series of will be passed to the Series constructor
-#' @param x a Series or something-turned-into-Series
-#' @return Series
-wrap_s = function(x) {
-  if (inherits(x, "RPolarsSeries")) x else pl$Series(x)
+add_expr_methods_to_series = function() {
+  methods_exclude = c(
+    "agg_groups",
+    "to_series"
+  )
+  methods_diff = setdiff(ls(RPolarsExpr), ls(RPolarsSeries))
+
+  for (method in setdiff(methods_diff, methods_exclude)) {
+    if (!inherits(RPolarsExpr[[method]], "property")) {
+      # make a modified Expr function
+      new_f = eval(parse(text = paste0(r"(function() {
+        f = RPolarsExpr$)", method, r"(
+
+        # get the future args the new function will be called with
+        # not using ... as this will erase tooltips and defaults
+        # instead using sys.call/do.call
+        scall = as.list(sys.call()[-1])
+
+        df = self$to_frame()
+        col_name = self$name
+        self = pl$col(col_name)
+        # Override `self` in `$.RPolarsExpr`
+        environment(f) = environment()
+        expr = do.call(f, scall)
+
+        pcase(
+          inherits(expr, "RPolarsExpr"), df$select(expr)$to_series(0),
+          or_else = expr
+        )
+      })")))
+      # set new_method to have the same formals arguments
+      formals(new_f) = formals(method, RPolarsExpr)
+      RPolarsSeries[[method]] <<- new_f
+    }
+  }
 }
+
+
+## Sub-namespaces
+
+#' Make sub namespace of Series from Expr sub namespace
+#' @noRd
+series_make_sub_ns = function(pl_series, .expr_make_sub_ns_fn) {
+  df = pl_series$to_frame()
+  # Override `self` in `$.RPolarsExpr`
+  self = pl$col(pl_series$name) # nolint: object_usage_linter
+
+  fns = .expr_make_sub_ns_fn(pl$col(pl_series$name))
+  lapply(fns, \(f) {
+    environment(f) = parent.frame(2L)
+    new_f = function() {
+      scall = as.list(sys.call()[-1])
+      expr = do.call(f, scall)
+      pcase(
+        inherits(expr, "RPolarsExpr"), df$select(expr)$to_series(0),
+        or_else = expr
+      )
+    }
+
+    formals(new_f) = formals(f)
+    new_f
+  })
+}
+
+Series_arr = method_as_active_binding(\() series_make_sub_ns(self, expr_arr_make_sub_ns))
+
+Series_bin = method_as_active_binding(\() series_make_sub_ns(self, expr_bin_make_sub_ns))
+
+Series_cat = method_as_active_binding(\() series_make_sub_ns(self, expr_cat_make_sub_ns))
+
+Series_dt = method_as_active_binding(\() series_make_sub_ns(self, expr_dt_make_sub_ns))
+
+Series_list = method_as_active_binding(\() series_make_sub_ns(self, expr_list_make_sub_ns))
+
+Series_str = method_as_active_binding(\() series_make_sub_ns(self, expr_str_make_sub_ns))
+
+Series_struct = method_as_active_binding(\() series_make_sub_ns(self, expr_struct_make_sub_ns))
+
 
 #' Create new Series
 #' @description found in api as pl$Series named Series_constructor internally
@@ -60,9 +245,8 @@ wrap_s = function(x) {
 #' @return Series
 #' @aliases Series
 #'
-#' @examples {
-#'   pl$Series(1:4)
-#' }
+#' @examples
+#' pl$Series(1:4)
 pl_Series = function(x, name = NULL) {
   .pr$Series$new(x, name) |>
     unwrap("in pl$Series()")
@@ -78,35 +262,34 @@ Series_print = function() {
   invisible(self)
 }
 
-#' add Series
-#' @name Series_add
-#' @description Series arithmetics
-#' @param other Series or into Series
-#' @return Series
-#' @aliases add
-#' @keywords  Series
-#' @examples
-#' pl$Series(1:3)$add(11:13)
-#' pl$Series(1:3)$add(pl$Series(11:13))
-#' pl$Series(1:3)$add(1L)
-#' 1L + pl$Series(1:3)
-#' pl$Series(1:3) + 1L
-Series_add = function(other) {
-  .pr$Series$add(self, wrap_s(other))
-}
-#' @export
-#' @rdname Series_add
-#' @param s1 lhs Series
-#' @param s2 rhs Series or any into Series
-"+.RPolarsSeries" = function(s1, s2) wrap_s(s1)$add(s2)
 
-#' sub Series
-#' @name Series_sub
-#' @description Series arithmetics
-#' @param other Series or into Series
-#' @return Series
-#' @aliases sub
-#' @keywords  Series
+#' Add Series
+#'
+#' Method equivalent of addition operator `series + other`.
+#' @param other [Series][Series_class] like object of numeric or string values.
+#' Converted to [Series][Series_class] by [as_polars_series()] in this method.
+#' @return [Series][Series_class]
+#' @seealso
+#' - [Arithmetic operators][S3_arithmetic]
+#' @examples
+#' pl$Series(1:3)$add(pl$Series(11:13))
+#' pl$Series(1:3)$add(11:13)
+#' pl$Series(1:3)$add(1L)
+#'
+#' pl$Series("a")$add("-z")
+Series_add = function(other) {
+  .pr$Series$add(self, as_polars_series(other))
+}
+
+
+#' Subtract Series
+#'
+#' Method equivalent of subtraction operator `series - other`.
+#' @inherit Series_add return
+#' @param other [Series][Series_class] like object of numeric.
+#' Converted to [Series][Series_class] by [as_polars_series()] in this method.
+#' @seealso
+#' - [Arithmetic operators][S3_arithmetic]
 #' @examples
 #' pl$Series(1:3)$sub(11:13)
 #' pl$Series(1:3)$sub(pl$Series(11:13))
@@ -114,72 +297,86 @@ Series_add = function(other) {
 #' 1L - pl$Series(1:3)
 #' pl$Series(1:3) - 1L
 Series_sub = function(other) {
-  .pr$Series$sub(self, wrap_s(other))
+  .pr$Series$sub(self, as_polars_series(other))
 }
-#' @export
-#' @rdname Series_sub
-#' @param s1 lhs Series
-#' @param s2 rhs Series or any into Series
-"-.RPolarsSeries" = function(s1, s2) wrap_s(s1)$sub(s2)
 
-#' div Series
-#' @name Series_div
-#' @description Series arithmetics
-#' @param other Series or into Series
-#' @return Series
-#' @aliases div
-#' @keywords  Series
+
+#' Divide Series
+#'
+#' Method equivalent of division operator `series / other`.
+#' @inherit Series_sub params return
+#' @seealso
+#' - [Arithmetic operators][S3_arithmetic]
 #' @examples
 #' pl$Series(1:3)$div(11:13)
 #' pl$Series(1:3)$div(pl$Series(11:13))
 #' pl$Series(1:3)$div(1L)
-#' 2L / pl$Series(1:3)
-#' pl$Series(1:3) / 2L
 Series_div = function(other) {
-  .pr$Series$div(self, wrap_s(other))
+  .pr$Series$div(self, as_polars_series(other))
 }
-#' @export
-#' @rdname Series_div
-#' @param s1 lhs Series
-#' @param s2 rhs Series or any into Series
-"/.RPolarsSeries" = function(s1, s2) wrap_s(s1)$div(s2)
 
-#' mul Series
-#' @name Series_mul
-#' @description Series arithmetics
-#' @param other Series or into Series
-#' @return Series
-#' @aliases mul
-#' @keywords  Series
+
+#' Floor Divide Series
+#'
+#' Method equivalent of floor division operator `series %/% other`.
+#' @inherit Series_sub params return
+#' @seealso
+#' - [Arithmetic operators][S3_arithmetic]
+#' @examples
+#' pl$Series(1:3)$floor_div(11:13)
+#' pl$Series(1:3)$floor_div(pl$Series(11:13))
+#' pl$Series(1:3)$floor_div(1L)
+Series_floor_div = function(other) {
+  self$to_frame()$select(pl$col(self$name)$floor_div(as_polars_series(other)))$to_series(0)
+}
+
+
+#' Multiply Series
+#'
+#' Method equivalent of multiplication operator `series * other`.
+#' @inherit Series_sub params return
+#' @seealso
+#' - [Arithmetic operators][S3_arithmetic]
 #' @examples
 #' pl$Series(1:3)$mul(11:13)
 #' pl$Series(1:3)$mul(pl$Series(11:13))
 #' pl$Series(1:3)$mul(1L)
-#' 2L * pl$Series(1:3)
-#' pl$Series(1:3) * 2L
 Series_mul = function(other) {
-  .pr$Series$mul(self, wrap_s(other))
+  .pr$Series$mul(self, as_polars_series(other))
 }
-#' @export
-#' @rdname Series_mul
-#' @param s1 lhs Series
-#' @param s2 rhs Series or any into Series
-"*.RPolarsSeries" = function(s1, s2) wrap_s(s1)$mul(s2)
 
-#' rem Series
-#' @description Series arithmetics, remainder
-#' @param other Series or into Series
-#' @return Series
-#' @keywords Series
-#' @aliases rem
-#' @name Series_rem
+
+#' Modulo Series
+#'
+#' Method equivalent of modulo operator `series %% other`.
+#' @inherit Series_sub params return
+#' @seealso
+#' - [Arithmetic operators][S3_arithmetic]
 #' @examples
-#' pl$Series(1:4)$rem(2L)
-#' pl$Series(1:3)$rem(pl$Series(11:13))
-#' pl$Series(1:3)$rem(1L)
-Series_rem = function(other) {
-  .pr$Series$rem(self, wrap_s(other))
+#' pl$Series(1:4)$mod(2L)
+#' pl$Series(1:3)$mod(pl$Series(11:13))
+#' pl$Series(1:3)$mod(1L)
+Series_mod = function(other) {
+  .pr$Series$rem(self, as_polars_series(other))
 }
+
+
+#' Power Series
+#'
+#' Method equivalent of power operator `series ^ other`.
+#' @inherit Series_sub return
+#' @param exponent [Series][Series_class] like object of numeric.
+#' Converted to [Series][Series_class] by [as_polars_series()] in this method.
+#' @seealso
+#' - [Arithmetic operators][S3_arithmetic]
+#' @examples
+#' s = as_polars_series(1:4, name = "foo")
+#'
+#' s$pow(3L)
+Series_pow = function(exponent) {
+  self$to_frame()$select(pl$col(self$name)$pow(as_polars_series(exponent)))$to_series(0)
+}
+
 
 #' Compare Series
 #' @name Series_compare
@@ -192,7 +389,7 @@ Series_rem = function(other) {
 #' @examples
 #' pl$Series(1:5) == pl$Series(c(1:3, NA_integer_, 10L))
 Series_compare = function(other, op) {
-  other_s = wrap_s(other)
+  other_s = as_polars_series(other)
   s_len = self$len()
   o_len = other_s$len()
   if (
@@ -202,40 +399,31 @@ Series_compare = function(other, op) {
   ) {
     stop("in compare Series: not same length or either of length 1.")
   }
-  .pr$Series$compare(self, wrap_s(other), op)
+  .pr$Series$compare(self, as_polars_series(other), op)
 }
+
+
+# TODO: move to the other file
 #' @export
 #' @rdname Series_compare
 #' @param s1 lhs Series
 #' @param s2 rhs Series or any into Series
-"==.RPolarsSeries" = function(s1, s2) unwrap(wrap_s(s1)$compare(s2, "equal"))
+"==.RPolarsSeries" = function(s1, s2) unwrap(as_polars_series(s1)$compare(s2, "equal"))
 #' @export
 #' @rdname Series_compare
-"!=.RPolarsSeries" = function(s1, s2) unwrap(wrap_s(s1)$compare(s2, "not_equal"))
+"!=.RPolarsSeries" = function(s1, s2) unwrap(as_polars_series(s1)$compare(s2, "not_equal"))
 #' @export
 #' @rdname Series_compare
-"<.RPolarsSeries" = function(s1, s2) unwrap(wrap_s(s1)$compare(s2, "lt"))
+"<.RPolarsSeries" = function(s1, s2) unwrap(as_polars_series(s1)$compare(s2, "lt"))
 #' @export
 #' @rdname Series_compare
-">.RPolarsSeries" = function(s1, s2) unwrap(wrap_s(s1)$compare(s2, "gt"))
+">.RPolarsSeries" = function(s1, s2) unwrap(as_polars_series(s1)$compare(s2, "gt"))
 #' @export
 #' @rdname Series_compare
-"<=.RPolarsSeries" = function(s1, s2) unwrap(wrap_s(s1)$compare(s2, "lt_eq"))
+"<=.RPolarsSeries" = function(s1, s2) unwrap(as_polars_series(s1)$compare(s2, "lt_eq"))
 #' @export
 #' @rdname Series_compare
-">=.RPolarsSeries" = function(s1, s2) unwrap(wrap_s(s1)$compare(s2, "gt_eq"))
-
-
-#' Shape of series
-#'
-#' @return dimension vector of Series
-#' @keywords Series
-#' @name Series_shape
-#'
-#' @examples identical(pl$Series(1:2)$shape, 2:1)
-Series_shape = method_as_property(function() {
-  .pr$Series$shape(self)
-})
+">=.RPolarsSeries" = function(s1, s2) unwrap(as_polars_series(s1)$compare(s2, "gt_eq"))
 
 
 #' Get r vector/list
@@ -248,7 +436,7 @@ Series_shape = method_as_property(function() {
 #' @details
 #' Fun fact: Nested polars Series list must have same inner type, e.g. List(List(Int32))
 #' Thus every leaf(non list type) will be placed on the same depth of the tree, and be the same type.
-#'
+#' @inheritSection DataFrame_class Conversion to R data types considerations
 #' @examples
 #'
 #' series_vec = pl$Series(letters[1:3])
@@ -306,19 +494,6 @@ Series_to_r_vector = Series_to_vector
 #' @examples #
 Series_to_r_list = \(int64_conversion = polars_options()$int64_conversion) {
   as.list(unwrap(.pr$Series$to_r(self, int64_conversion)), "in $to_r_list():")
-}
-
-
-#' Take absolute value of Series
-#'
-#' @return Series
-#' @keywords Series
-#' @aliases abs
-#' @name Series_abs
-#' @examples
-#' pl$Series(-2:2)$abs()
-Series_abs = function() {
-  unwrap(.pr$Series$abs(self), "in $abs():")
 }
 
 
@@ -381,35 +556,6 @@ Series_map_elements = function(
 #' pl$Series(1:10)$len()
 #'
 Series_len = use_extendr_wrapper
-
-#' Series_floor
-#' @description Floor of this Series
-#'
-#' @return numeric
-#' @keywords Series
-#' @aliases Series_floor
-#' @name Series_floor
-#' @examples
-#' pl$Series(c(.5, 1.999))$floor()
-#'
-Series_floor = function() {
-  unwrap(.pr$Series$floor(self), "in $floor():")
-}
-
-
-#' Series_ceil
-#' @description Ceil of this Series
-#'
-#' @return bool
-#' @keywords Series
-#' @aliases Series_ceil
-#' @name Series_ceil
-#' @examples
-#' pl$Series(c(.5, 1.999))$ceil()
-#'
-Series_ceil = function() {
-  unwrap(.pr$Series$ceil(self), "in $ceil():")
-}
 
 #' Lengths of Series memory chunks
 #' @description Get the Lengths of Series memory chunks as vector.
@@ -483,18 +629,6 @@ Series_append = function(other, immutable = TRUE) {
 #' pl$Series(1:3, name = "alice")$alias("bob")
 Series_alias = use_extendr_wrapper
 
-#' Property: Name
-#' @description Get name of Series
-#'
-#' @return String the name
-#' @keywords Series
-#' @aliases name
-#' @name Series_name
-#' @examples
-#' pl$Series(1:3, name = "alice")$name
-Series_name = method_as_property(function() {
-  .pr$Series$name(self)
-})
 
 #' Reduce Boolean Series with ANY
 #'
@@ -544,40 +678,39 @@ Series_arg_min = use_extendr_wrapper
 
 
 #' Clone a Series
-#' @name Series_clone
-#' @description Rarely useful as Series are nearly 100% immutable
-#' Any modification of a Series should lead to a clone anyways.
+#'
+#' This makes a very cheap deep copy/clone of an existing
+#' [`Series`][Series_class]. Rarely useful as `Series` are nearly 100%
+#' immutable. Any modification of a `Series` should lead to a clone anyways, but
+#' this can be useful when dealing with attributes (see examples).
 #'
 #' @return Series
-#' @docType NULL
-#' @format NULL
-#' @aliases Series_clone
-#' @keywords  Series
 #' @examples
-#' s1 = pl$Series(1:3)
-#' s2 = s1$clone()
-#' s3 = s1
-#' pl$mem_address(s1) != pl$mem_address(s2)
-#' pl$mem_address(s1) == pl$mem_address(s3)
+#' df1 = pl$Series(1:10)
 #'
+#' # Make a function to take a Series, add an attribute, and return a Series
+#' give_attr = function(data) {
+#'   attr(data, "created_on") = "2024-01-29"
+#'   data
+#' }
+#' df2 = give_attr(df1)
+#'
+#' # Problem: the original Series also gets the attribute while it shouldn't!
+#' attributes(df1)
+#'
+#' # Use $clone() inside the function to avoid that
+#' give_attr = function(data) {
+#'   data = data$clone()
+#'   attr(data, "created_on") = "2024-01-29"
+#'   data
+#' }
+#' df1 = pl$Series(1:10)
+#' df2 = give_attr(df1)
+#'
+#' # now, the original Series doesn't get this attribute
+#' attributes(df1)
 Series_clone = use_extendr_wrapper
 
-#' Cumulative sum
-#' @description  Get an array with the cumulative sum computed at every element.
-#' @param reverse bool, default FALSE, if true roll over vector from back to forth
-#' @return Series
-#' @keywords Series
-#' @aliases Series_cumsum
-#' @name Series_cumsum
-#' @details
-#' The Dtypes Int8, UInt8, Int16 and UInt16 are cast to
-#' Int64 before summing to prevent overflow issues.
-#' @examples
-#' pl$Series(c(1:2, NA, 3, NaN, 4, Inf))$cum_sum()
-#' pl$Series(c(1:2, NA, 3, Inf, 4, -Inf, 5))$cum_sum()
-Series_cum_sum = function(reverse = FALSE) {
-  .pr$Series$cum_sum(self, reverse) |> unwrap("in $cum_sum()")
-}
 
 #' Sum
 #' @description  Reduce Series with sum
@@ -674,34 +807,6 @@ Series_std = function(ddof = 1) {
   unwrap(.pr$Series$std(self, ddof), "in $std():")
 }
 
-#' Get data type of Series
-#' @keywords Series
-#' @return DataType
-#' @aliases Series_dtype
-#' @name Series_dtype
-#' @examples
-#' pl$Series(1:4)$dtype
-#' pl$Series(c(1, 2))$dtype
-#' pl$Series(letters)$dtype
-Series_dtype = method_as_property(function() {
-  .pr$Series$dtype(self)
-})
-
-#' Get data type of Series
-#' @keywords Series
-#' @return DataType
-#' @aliases Series_flags
-#' @name Series_flags
-#' @details property sorted flags are not settable, use set_sorted
-#' @examples
-#' pl$Series(1:4)$sort()$flags
-Series_flags = method_as_property(function() {
-  list(
-    "SORTED_ASC" = .pr$Series$is_sorted_flag(self),
-    "SORTED_DESC" = .pr$Series$is_sorted_reverse_flag(self)
-  )
-})
-
 
 ## wait until in included in next py-polars release
 ### contribute polars, exposee nulls_last option
@@ -745,12 +850,11 @@ Series_set_sorted = function(descending = FALSE, in_place = FALSE) {
   if (in_place) invisible(NULL) else invisible(self)
 }
 
-# TODO contribute polars, Series.sort() has an * arg input which is unused
-# TODO contribute polars, Series.sort() is missing nulls_last option, that Expr_sort has
 #' Sort this Series
 #' @keywords Series
 #' @aliases Series_sort
-#' @param descending Sort in descending order..
+#' @param descending Sort in descending order.
+#' @param nulls_last Place null values last instead of first.
 #' @param in_place bool sort mutable in-place, breaks immutability
 #' If true will throw an error unless this option has been set:
 #' `options(polars.strictly_immutable = FALSE)`
@@ -759,7 +863,7 @@ Series_set_sorted = function(descending = FALSE, in_place = FALSE) {
 #'
 #' @examples
 #' pl$Series(c(1, NA, NaN, Inf, -Inf))$sort()
-Series_sort = function(descending = FALSE, in_place = FALSE) {
+Series_sort = function(descending = FALSE, nulls_last = FALSE, in_place = FALSE) {
   if (in_place && polars_options()$strictly_immutable) {
     stop(paste(
       "in_place sort breaks immutability, to enable mutable features run:\n",
@@ -770,7 +874,7 @@ Series_sort = function(descending = FALSE, in_place = FALSE) {
     self = self$clone()
   }
 
-  .pr$Series$sort_mut(self, descending)
+  .pr$Series$sort_mut(self, descending, nulls_last)
 }
 
 
@@ -806,9 +910,6 @@ Series_to_frame = function() {
 Series_equals = function(other, null_equal = FALSE, strict = FALSE) {
   .pr$Series$equals(self, other, null_equal, strict)
 }
-# TODO add Series_cast and show examples of strict and null_equals
-
-
 
 #' Rename a series
 #'
@@ -865,9 +966,6 @@ Series_rep = function(n, rechunk = TRUE) {
   unwrap(.pr$Series$rep(self, n, rechunk), "in $rep():")
 }
 
-
-# TODO contribute polars suprisingly pl$Series(1:3,"bob")$std(3) yields Inf
-
 in_DataType = function(l, rs) any(sapply(rs, function(r) l == r))
 
 #' is_numeric
@@ -887,78 +985,6 @@ Series_is_numeric = function() {
   in_DataType(self$dtype, pl$numeric_dtypes)
 }
 
-#' list: list related methods on Series of dtype List
-#' @description
-#' Create an object namespace of all list related methods.
-#' See the individual method pages for full details
-#' @keywords Series
-#' @return Series
-#' @aliases Series_list
-#' @examples
-#' s = pl$Series(list(1:3, 1:2, NULL))
-#' s
-#' s$list$first()
-Series_list = method_as_property(function() {
-  df = pl$DataFrame(self)
-  arr = expr_list_make_sub_ns(pl$col(self$name))
-  lapply(arr, \(f) {
-    \(...) df$select(f(...))
-  })
-})
-
-#' Any expr method on a Series
-#' @description
-#' Call an expression on a Series
-#' See the individual Expr method pages for full details
-#'
-#' @details
-#' This is a shorthand of writing  something like
-#' `pl$DataFrame(s)$select(pl$col("sname")$expr)$to_series(0)`
-#'
-#' This subnamespace is experimental. Submit an issue if anything
-#' unexpected happened.
-#'
-#' @keywords Series
-#' @return Expr
-#' @aliases Series_expr
-#' @examples
-#' s = pl$Series(list(1:3, 1:2, NULL))
-#' s$expr$first()
-#' s$expr$alias("alice")
-Series_expr = method_as_property(function() {
-  df = pl$DataFrame(self) # make a DataFrame from Series
-  self = pl$col(self$name) # override self to column named by series
-
-  # loop over each expression function
-  lapply(
-    RPolarsExpr,
-    \(f) { # f is orignial Expr method
-
-      # point back to env with above defined 'df' and 'self'
-      environment(f) = parent.frame(2L)
-
-      # make a modified Expr function
-      new_f = \() {
-        # get the future args the new function will be called with
-        # not using ... as this will erase tooltips and defaults
-        # instead using sys.call/do.call
-        scall = as.list(sys.call()[-1])
-
-        x = do.call(f, scall)
-        pcase(
-          inherits(x, "RPolarsExpr"), df$select(x)$to_series(0),
-          or_else = x
-        )
-      }
-
-      # set new_f to have the same formals arguments
-      formals(new_f) = formals(f)
-      class(new_f) = c("SeriesExpr", "function") #
-      new_f
-    }
-  )
-})
-
 
 #' Series to Literal
 #' @description
@@ -967,15 +993,13 @@ Series_expr = method_as_property(function() {
 #' @return Expr
 #' @aliases to_lit
 #' @examples
-#' (
-#'   pl$Series(list(1:1, 1:2, 1:3, 1:4))
-#'   $print()
-#'   $to_lit()
-#'   $list$len()
-#'   $sum()
-#'   $cast(pl$dtypes$Int8)
-#'   $to_series()
-#' )
+#' pl$Series(list(1:1, 1:2, 1:3, 1:4))$
+#'   print()$
+#'   to_lit()$
+#'   list$len()$
+#'   sum()$
+#'   cast(pl$dtypes$Int8)$
+#'   to_series()
 Series_to_lit = function() {
   pl$lit(self)
 }

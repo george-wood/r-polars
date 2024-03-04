@@ -2,36 +2,132 @@
 % Please edit documentation in R/dataframe__frame.R
 \name{DataFrame_class}
 \alias{DataFrame_class}
+\alias{RPolarsDataFrame}
 \title{Inner workings of the DataFrame-class}
-\value{
-Not applicable
-}
 \description{
-The \code{DataFrame}-class is simply two environments of respectively the public
-and private methods/function calls to the polars Rust side. The instantiated
-\code{DataFrame}-object is an \code{externalptr} to a low-level Rust polars DataFrame
-object.
+The \code{DataFrame}-class is simply two environments of respectively
+the public and private methods/function calls to the polars Rust side. The
+instantiated \code{DataFrame}-object is an \code{externalptr} to a low-level Rust
+polars DataFrame object.
 
-The S3 method \code{.DollarNames.RPolarsDataFrame} exposes all public \verb{$foobar()}-methods
-which are callable onto the object. Most methods return another \code{DataFrame}-
-class instance or similar which allows for method chaining. This class system
-could be called "environment classes" (in lack of a better name) and is the
-same class system \code{extendr} provides, except here there are both a public and
-private set of methods. For implementation reasons, the private methods are
-external and must be called from \code{.pr$DataFrame$methodname()}. Also, all
-private methods must take any \code{self} as an argument, thus they are pure
-functions. Having the private methods as pure functions solved/simplified
-self-referential complications.
+The S3 method \code{.DollarNames.RPolarsDataFrame} exposes all public
+\verb{$foobar()}-methods which are callable onto the object. Most methods return
+another \code{DataFrame}- class instance or similar which allows for method
+chaining. This class system could be called "environment classes" (in lack
+of a better name) and is the same class system \code{extendr} provides, except
+here there are both a public and private set of methods. For implementation
+reasons, the private methods are external and must be called from
+\code{.pr$DataFrame$methodname()}. Also, all private methods must take any
+\code{self} as an argument, thus they are pure functions. Having the private
+methods as pure functions solved/simplified self-referential complications.
 }
 \details{
-Check out the source code in \href{https://github.com/pola-rs/r-polars/blob/main/R/dataframe__frame.R}{R/dataframe_frame.R}
+Check out the source code in
+\href{https://github.com/pola-rs/r-polars/blob/main/R/dataframe__frame.R}{R/dataframe_frame.R}
 to see how public methods are derived from private methods. Check out
 \href{https://github.com/pola-rs/r-polars/blob/main/R/extendr-wrappers.R}{extendr-wrappers.R}
 to see the \code{extendr}-auto-generated methods. These are moved to \code{.pr} and
-converted into pure external functions in \href{https://github.com/pola-rs/r-polars/blob/main/R/after-wrappers.R}{after-wrappers.R}. In \href{https://github.com/pola-rs/r-polars/blob/main/R/zzz.R}{zzz.R}
-(named \code{zzz} to be last file sourced) the \code{extendr}-methods are removed and
+converted into pure external functions in
+\href{https://github.com/pola-rs/r-polars/blob/main/R/after-wrappers.R}{after-wrappers.R}.
+In \href{https://github.com/pola-rs/r-polars/blob/main/R/zzz.R}{zzz.R} (named
+\code{zzz} to be last file sourced) the \code{extendr}-methods are removed and
 replaced by any function prefixed \code{DataFrame_}.
 }
+\section{Active bindings}{
+
+\subsection{columns}{
+
+\verb{$columns} returns a character vector with the column names.
+}
+
+\subsection{dtypes}{
+
+\verb{$dtypes} returns a unnamed list with the \link[=pl_dtypes]{data type} of each column.
+}
+
+\subsection{flags}{
+
+\verb{$flags} returns a nested list with column names at the top level and
+column flags in each sublist.
+
+Flags are used internally to avoid doing unnecessary computations, such as
+sorting a variable that we know is already sorted. The number of flags
+varies depending on the column type: columns of type \code{array} and \code{list}
+have the flags \code{SORTED_ASC}, \code{SORTED_DESC}, and \code{FAST_EXPLODE}, while other
+column types only have the former two.
+\itemize{
+\item \code{SORTED_ASC} is set to \code{TRUE} when we sort a column in increasing order, so
+that we can use this information later on to avoid re-sorting it.
+\item \code{SORTED_DESC} is similar but applies to sort in decreasing order.
+}
+}
+
+\subsection{height}{
+
+\verb{$height} returns the number of rows in the DataFrame.
+}
+
+\subsection{schema}{
+
+\verb{$schema} returns a named list with the \link[=pl_dtypes]{data type} of each column.
+}
+
+\subsection{shape}{
+
+\verb{$shape} returns a numeric vector of length two with the number of rows and
+the number of columns.
+}
+
+\subsection{width}{
+
+\verb{$width} returns the number of columns in the DataFrame.
+}
+}
+
+\section{Conversion to R data types considerations}{
+
+When converting Polars objects, such as \link[=DataFrame_class]{DataFrames}
+to R objects, for example via the \code{\link[=as.data.frame.RPolarsDataFrame]{as.data.frame()}} generic function,
+each type in the Polars object is converted to an R type.
+In some cases, an error may occur because the conversion is not appropriate.
+In particular, there is a high possibility of an error when converting
+a \link[=DataType_Datetime]{Datetime} type without a time zone.
+A \link[=DataType_Datetime]{Datetime} type without a time zone in Polars is converted
+to the \link{POSIXct} type in R, which takes into account the time zone in which
+the R session is running (which can be checked with the \code{\link[=Sys.timezone]{Sys.timezone()}}
+function). In this case, if ambiguous times are included, a conversion error
+will occur. In such cases, change the session time zone using
+\code{\link[base:Sys.setenv]{Sys.setenv(TZ = "UTC")}} and then perform the conversion, or use the
+\code{\link[=ExprDT_replace_time_zone]{$dt$replace_time_zone()}} method on the Datetime type column to
+explicitly specify the time zone before conversion.
+
+\if{html}{\out{<div class="sourceCode r">}}\preformatted{# Due to daylight savings, clocks were turned forward 1 hour on Sunday, March 8, 2020, 2:00:00 am
+# so this particular date-time doesn't exist
+non_existent_time = pl$Series("2020-03-08 02:00:00")$str$strptime(pl$Datetime(), "\%F \%T")
+
+withr::with_envvar(
+  new = c(TZ = "America/New_York"),
+  \{
+    tryCatch(
+      # This causes an error due to the time zone (the `TZ` env var is affected).
+      as.vector(non_existent_time),
+      error = function(e) e
+    )
+  \}
+)
+#> <error: in to_r: ComputeError(ErrString("datetime '2020-03-08 02:00:00' is non-existent in time zone 'America/New_York'. Non-existent datetimes are not yet supported")) When calling: devtools::document()>
+
+withr::with_envvar(
+  new = c(TZ = "America/New_York"),
+  \{
+    # This is safe.
+    as.vector(non_existent_time$dt$replace_time_zone("UTC"))
+  \}
+)
+#> [1] "2020-03-08 02:00:00 UTC"
+}\if{html}{\out{</div>}}
+}
+
 \examples{
 # see all public exported method names (normally accessed via a class
 # instance with $)
@@ -40,14 +136,11 @@ ls(.pr$env$RPolarsDataFrame)
 # see all private methods (not intended for regular use)
 ls(.pr$DataFrame)
 
-
 # make an object
-df = pl$DataFrame(iris)
+df = as_polars_df(iris)
 
-
-# use a public method/property
+# call an active binding
 df$shape
-df2 = df
 
 # use a private method, which has mutability
 result = .pr$DataFrame$set_column_from_robj(df, 150:1, "some_ints")
@@ -55,8 +148,13 @@ result = .pr$DataFrame$set_column_from_robj(df, 150:1, "some_ints")
 # Column exists in both dataframes-objects now, as they are just pointers to
 # the same object
 # There are no public methods with mutability.
+df2 = df
+
 df$columns
 df2$columns
+
+# Show flags
+df$sort("Sepal.Length")$flags
 
 # set_column_from_robj-method is fallible and returned a result which could
 # be "ok" or an error.

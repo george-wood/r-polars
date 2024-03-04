@@ -7,6 +7,7 @@ list_man_html = list.files("docs/man",
 
 for (i in list_man_html) {
   orig = readLines(i, warn = FALSE)
+
   # fix escaping of left-angle brackets (not needed for right-angle brackets)
   new = gsub("\\\\&lt;", "&lt;", orig)
   new = gsub("\\\\&gt;", "&gt;", orig)
